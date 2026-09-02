@@ -1,6 +1,6 @@
 {
-  "name": "mol-labs-agent-skill",
-  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own wallet, the Lab owner grants it the Contributor role, and the agent self-issues a service token and uploads files to the data room. No MCP server, no dependencies beyond Node + viem, and no funds — no gas, no USDC, no x402.",
+  "name": "molecule-lab-contributor-agent",
+  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own wallet, the Lab owner grants it the Contributor role, and the agent self-issues a service token and uploads files to the data room. No MCP server, no dependencies beyond Node + viem, and no funds \u2014 no gas, no USDC, no x402.",
   "version": "0.1.0",
   "author": {
     "name": "Molecule",
@@ -8,5 +8,13 @@
   },
   "homepage": "https://docs.molecule.xyz",
   "license": "Apache-2.0",
-  "keywords": ["desci", "molecule", "labs", "agent", "contributor", "service-token", "graphql"]
+  "keywords": [
+    "desci",
+    "molecule",
+    "labs",
+    "agent",
+    "contributor",
+    "service-token",
+    "graphql"
+  ]
 }

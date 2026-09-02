@@ -40,22 +40,22 @@ No MCP server, no Python, no build step. The skill is one markdown file.
 **Claude Code** — drop the skill in and it is picked up:
 
 ```bash
-git clone https://github.com/moleculeprotocol/mol-labs-agent-skill.git
+git clone https://github.com/moleculeprotocol/molecule-lab-contributor-agent.git
 mkdir -p .claude/skills
-cp -R mol-labs-agent-skill/skills/molecule-lab-contributor .claude/skills/
+cp -R molecule-lab-contributor-agent/skills/molecule-lab-contributor .claude/skills/
 ```
 
 or load the whole repo as a plugin:
 
 ```bash
-claude --plugin-dir /path/to/mol-labs-agent-skill
+claude --plugin-dir /path/to/molecule-lab-contributor-agent
 ```
 
 or install it from GitHub:
 
 ```
-/plugin marketplace add moleculeprotocol/mol-labs-agent-skill
-/plugin install mol-labs-agent-skill@mol-labs-agent-skill-marketplace
+/plugin marketplace add moleculeprotocol/molecule-lab-contributor-agent
+/plugin install molecule-lab-contributor-agent@molecule-lab-contributor-agent-marketplace
 ```
 
 **OpenAI Codex** — copy `skills/molecule-lab-contributor/SKILL.md` into the skills
@@ -64,6 +64,24 @@ directory your Codex version scans (check `/skills`), or surface it through `AGE
 **Any other agent** — the file is plain markdown. Paste it into a system prompt or a
 context file; it carries its own constants, GraphQL documents and a complete runnable
 script.
+
+## Configuration
+
+The skill reads three values from the process environment. Pass them inline, or copy
+`.env.example` to `.env` and load it with Node's built-in flag — no dependency:
+
+```bash
+cp .env.example .env      # then fill it in; .env is gitignored
+node --env-file=.env agent-upload.mjs ./findings.csv
+```
+
+| | |
+|---|---|
+| `CONSUMER_CREDENTIAL` | your `mol_<consumerId>_<secret>` — secret |
+| `OCL_ID` | the Lab you were granted a role on |
+| `AGENT_PRIVATE_KEY` | the agent's own key — secret. **Generate once and keep it**: a new key is a different agent with no role, and the owner would have to grant it again. |
+
+`SERVICE_NAME`, `GRAPHQL_URL` and `LAB_APP_URL` are optional; the defaults are staging.
 
 ## Environments
 

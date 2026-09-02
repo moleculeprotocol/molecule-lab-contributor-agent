@@ -1,5 +1,5 @@
 {
-  "name": "mol-labs-agent-skill-marketplace",
+  "name": "molecule-lab-contributor-agent-marketplace",
   "description": "Marketplace for the Molecule Labs agent skill: operate as a Contributor inside a Lab you do not own.",
   "owner": {
     "name": "Molecule",
@@ -7,7 +7,7 @@
   },
   "plugins": [
     {
-      "name": "mol-labs-agent-skill",
+      "name": "molecule-lab-contributor-agent",
       "source": "./",
       "description": "Agent-as-Contributor lane for Molecule Labs: generate a wallet, get granted a role, self-issue a service token, upload files. No MCP server and no funds required.",
       "version": "0.1.0"

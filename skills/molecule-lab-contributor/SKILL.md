@@ -30,6 +30,11 @@ This is the **contributor** lane. You do not own a Lab and you never create one.
 | **`oclId`** | The Lab's canonical 32-byte id, e.g. `0x0101…0042`. The human copies it from the Lab in the app. |
 | **Node 18+** | For `fetch` and `viem`. Install viem with `npm i viem` in a scratch directory. |
 
+Read all three from the environment. Pass them inline, or put them in a `.env` (see
+`.env.example` in this repo) and load it with Node's built-in flag — no dependency:
+`node --env-file=.env agent-upload.mjs ./file.csv`. Persist `AGENT_PRIVATE_KEY` there:
+a new key on the next run is a different agent with no role on the Lab.
+
 Never print the consumer credential, the service token, or the agent private key into
 your reply. Read them from the environment.
 
@@ -106,8 +111,13 @@ the nonce there. It is the single most common way this flow fails.
 ```javascript
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
-const agentPrivateKey = process.env.AGENT_PRIVATE_KEY ?? generatePrivateKey();
-const agentAccount = privateKeyToAccount(agentPrivateKey);
+if (!process.env.AGENT_PRIVATE_KEY) {
+  // Generate ONCE, hand the key to the human to store, then STOP. Do not carry on:
+  // a wallet nobody has granted a role to can never get past phase 3.
+  console.log("AGENT_PRIVATE_KEY=" + generatePrivateKey());
+  throw new Error("Store that key, get the role granted for its address, then re-run.");
+}
+const agentAccount = privateKeyToAccount(process.env.AGENT_PRIVATE_KEY);
 console.log("Agent wallet address:", agentAccount.address);
 ```
 
@@ -267,10 +277,21 @@ mutation Finish(
 }
 ```
 
+- `contentType` in 5a is **stored and shown to the human** — send the file's real MIME
+  type (`text/csv`, `application/pdf`, `image/png`). `application/octet-stream` is
+  accepted but leaves the file looking like an unidentified blob in the data room.
 - `accessLevel`: `"PUBLIC"` | `"HOLDERS"` | `"ADMIN"`.
 - `changeBy`: **your** wallet address — the file is attributed to you.
-- `path` for a **new** file (no underscores); `ref` (a `datasetId`) for a **new version**
-  of an existing file. One or the other, never both.
+- `path` for a **new** file; `ref` (a `datasetId`) for a **new version** of an existing
+  file. One or the other, never both. Underscores are fine — some older reference docs
+  say otherwise, but the API accepts them (verified against staging).
+- **Re-using an existing `path` fails.** A second upload to the same path returns
+  `UPSTREAM_UNAVAILABLE` / `MoleculeDataRoomPathOccupied` — "Path is occupied". Despite
+  that code sitting on the retryable list, **this is permanent**: retrying can never
+  succeed. To add a new version of a file, pass `ref` (its `datasetId`) instead of
+  `path`; otherwise choose a different path.
+- The stored path comes back **with a leading `/`** — you send `findings.csv` and
+  `dataRoom.files` reports `/findings.csv`. Match with `endsWith`, not `===`.
 - `categories` / `tags` are optional. If you set them, take valid values from the public
   `fileCategoriesAndTags` query rather than inventing them.
 - `contentText` is optional searchable text, used for semantic search.
@@ -316,6 +337,42 @@ query is nullable and does not throw for a missing Lab.
 Then give the human the link: `<LAB_APP_URL>/projects/<shortname>`. They will see the
 file in the data room, attributed to your address, flagged as an agent in the members list.
 
+## Reading the data room
+
+A Contributor can read as well as write — useful when the job is "analyse what's already
+in the Lab, then write the results back". Public query, `Authorization` only:
+
+```graphql
+query ReadDataRoom($oclId: String!) {
+  labWithDataRoomAndFiles(oclId: $oclId) {
+    shortname
+    dataRoom {
+      files {
+        path contentType contentHash version createdBy
+        downloadUrl downloadHeaders { key value } downloadUrlExpiry
+      }
+    }
+  }
+}
+```
+
+`GET` the `downloadUrl` with exactly the returned `downloadHeaders` to fetch the bytes.
+The URL is presigned and short-lived — read `downloadUrlExpiry` and re-run the query
+rather than caching the URL.
+
+```javascript
+const headers = {};
+(file.downloadHeaders ?? []).forEach((h) => (headers[h.key] = h.value));
+const body = await (await fetch(file.downloadUrl, { headers })).text();
+```
+
+`contentHash` lets you confirm the bytes are intact. Note it is **not** a bare SHA-256 of
+the content — it is the data room's own multihash-style digest, so compare it between
+reads rather than recomputing it locally.
+
+Files with a non-`PUBLIC` `accessLevel` are encrypted at rest and need the key-management
+flow, which this skill does not cover — their `downloadUrl` yields ciphertext.
+
 ---
 
 ## Complete script
@@ -325,8 +382,17 @@ Self-contained. Run it with the agent's own key and the `oclId` of the human's L
 ```javascript
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+
+// The stored contentType is what the human sees in the data room — send a real one.
+const MIME = {
+  ".csv": "text/csv", ".tsv": "text/tab-separated-values", ".json": "application/json",
+  ".txt": "text/plain", ".md": "text/markdown", ".pdf": "application/pdf",
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+const mimeFor = (f) => MIME[extname(f).toLowerCase()] ?? "application/octet-stream";
 
 const GRAPHQL_URL = process.env.GRAPHQL_URL ?? "https://staging.graphql.api.molecule.xyz/graphql";
 const LAB_APP_URL = process.env.LAB_APP_URL ?? "https://testnet.labs.molecule.xyz";
@@ -400,8 +466,8 @@ async function main() {
   console.log("1/6 Agent wallet:", agentAccount.address);
 
   // ---- Phase 2/3: wait for the human's grant (public query, no service token) ----
-  console.log("2/6 Ask the lab owner to add that address as Contributor (isAgent = true).");
-  let grant;
+  // Poll first and only prompt on a miss — the human is often already ahead of you.
+  let grant, asked = false;
   for (let i = 0; i < 60; i++) {
     const members = await graphql(
       `query ListLabMembers($oclId: String!) {
@@ -413,6 +479,10 @@ async function main() {
       (m) => m.walletAddress.toLowerCase() === agentAccount.address.toLowerCase(),
     );
     if (grant) break;
+    if (!asked) {
+      console.log("2/6 Ask the lab owner to add that address as Contributor (isAgent = true).");
+      asked = true;
+    }
     await sleep(5000); // poll for up to 5 minutes
   }
   if (!grant) throw new Error("No role grant found for the agent wallet — ask the owner to add it");
@@ -454,7 +524,7 @@ async function main() {
           error { code message requestId retryable details }
         }
       }`,
-      { oclId: OCL_ID, contentType: "application/octet-stream", contentLength: bytes.length },
+      { oclId: OCL_ID, contentType: mimeFor(filePath), contentLength: bytes.length },
     );
     assertOk(initiated.initiateCreateOrUpdateFile, "initiateCreateOrUpdateFile");
     const { uploadToken, uploadUrl, method, headers } = initiated.initiateCreateOrUpdateFile;
@@ -494,12 +564,16 @@ async function main() {
     }`,
     { oclId: OCL_ID },
   );
-  const file = verify.labWithDataRoomAndFiles.dataRoom.files.find((f) => f.path.endsWith(basename(filePath)));
+  const lab = verify.labWithDataRoomAndFiles;
+  // Nullable by design: null means the lab is not registered, and the query does not throw.
+  if (!lab) throw new Error(`Lab ${OCL_ID} is not registered — check the oclId`);
+  // Stored paths carry a leading slash, so match on endsWith rather than equality.
+  const file = lab.dataRoom.files.find((f) => f.path.endsWith(basename(filePath)));
   if (!file) throw new Error("File not found in the data room");
   const mine = file.createdBy?.toLowerCase() === agentAccount.address.toLowerCase();
   console.log("6/6 Verified:", file.path, file.accessLevel, mine ? "— attributed to the agent" : `— createdBy: ${file.createdBy}`);
-  if (verify.labWithDataRoomAndFiles.shortname) {
-    console.log("Human can see it at:", `${LAB_APP_URL}/projects/${verify.labWithDataRoomAndFiles.shortname}`);
+  if (lab.shortname) {
+    console.log("Human can see it at:", `${LAB_APP_URL}/projects/${lab.shortname}`);
   }
 }
 
@@ -532,7 +606,8 @@ AGENT_PRIVATE_KEY="0x…" CONSUMER_CREDENTIAL="mol_…" OCL_ID="0x0101…" \
 | `UNAUTHENTICATED` / `INVALID_SIGNATURE` | The message was reformatted, rebuilt, or signed as typed data | Sign the returned `message` verbatim with `personal_sign`. |
 | `UNAUTHORIZED` right after the grant | Indexer lag — role state has not propagated | Retry with backoff. Do **not** re-issue the token or re-grant. |
 | `UNAUTHORIZED` that never clears | The wallet holds `VIEWER`, or the grant expired | Check `listLabMembers`; ask for `CONTRIBUTOR`. |
-| `NOT_FOUND` — "Project 0x… does not exist" | Wrong `oclId`, or the Lab was created seconds ago and is not indexed | Re-check the id; retry with backoff if it was just created. |
+| `NOT_FOUND` / `PROJECT_NOT_FOUND` — "Project not found: 0x…" | Wrong `oclId`, or the Lab was created seconds ago and is not indexed. Surfaces at the phase-3 members poll, before any upload, and arrives as a **thrown** query error rather than in-band | Re-check the id character for character; retry with backoff only if the Lab was genuinely just created. |
+| `UPSTREAM_UNAVAILABLE` / `MoleculeDataRoomPathOccupied` — "Path is occupied" | That `path` already exists in the data room (e.g. you re-ran the same upload) | **Do not retry** — the code is on the retryable list but this condition is permanent. Use `ref: <datasetId>` for a new version, or a different `path`. |
 | Upload `PUT` returns 403 | Headers from `initiate` were altered, or the presigned URL expired (~15 min) | Re-run `initiate` and PUT with the exact returned headers. |
 
 ## Revoking
