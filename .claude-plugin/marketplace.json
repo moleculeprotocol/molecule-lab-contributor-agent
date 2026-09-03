@@ -9,8 +9,8 @@
     {
       "name": "molecule-lab-contributor-agent",
       "source": "./",
-      "description": "Agent-as-Contributor lane for Molecule Labs: generate a wallet, get granted a role, self-issue a service token, upload files. No MCP server and no funds required.",
-      "version": "0.1.0"
+      "description": "Agent-as-Contributor lane for Molecule Labs: generate a wallet, get granted a role, self-issue a service token, upload files public or encrypted \u2014 with a mandatory ask before anything is published. Python + uv, no MCP server, no funds.",
+      "version": "0.3.0"
     }
   ]
 }

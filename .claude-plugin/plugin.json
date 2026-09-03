@@ -1,7 +1,7 @@
 {
   "name": "molecule-lab-contributor-agent",
-  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own wallet, the Lab owner grants it the Contributor role, and the agent self-issues a service token and uploads files to the data room. No MCP server, no dependencies beyond Node + viem, and no funds \u2014 no gas, no USDC, no x402.",
-  "version": "0.1.0",
+  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own wallet, the Lab owner grants it the Contributor role, and the agent self-issues a service token and uploads files to the data room \u2014 public, or client-side AES-256-GCM encrypted. It asks the human which before it publishes anything: there are no defaults for visibility, path, or environment. Python, run with uv; no MCP server and no funds \u2014 no gas, no USDC, no x402.",
+  "version": "0.3.0",
   "author": {
     "name": "Molecule",
     "email": "vladimir@molecule.to"
@@ -15,6 +15,8 @@
     "agent",
     "contributor",
     "service-token",
-    "graphql"
+    "graphql",
+    "encryption",
+    "private-upload"
   ]
 }

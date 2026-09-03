@@ -1,6 +1,6 @@
 {
   "name": "molecule-lab-contributor-agent",
-  "version": "0.1.0",
-  "description": "Let an AI agent work inside a Molecule Lab that someone else owns: generate a wallet, get granted the Contributor role, self-issue a service token, upload files. No MCP server and no funds required.",
+  "version": "0.3.0",
+  "description": "Let an AI agent work inside a Molecule Lab that someone else owns: generate a wallet, get granted the Contributor role, self-issue a service token, upload files publicly or client-side encrypted \u2014 always asking the human which. Python + uv; no MCP server and no funds required.",
   "skills": "./skills/"
 }
