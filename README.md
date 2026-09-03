@@ -69,23 +69,58 @@ nothing compiled from source. The first run takes a few seconds; after that it i
 
 ## Install
 
+**Two things, in this order.** The plugin commands install the skill and the server; they do
+not install uv, and without uv the server cannot start.
+
+### 1. Install uv (once per machine)
+
 ```bash
-git clone https://github.com/moleculeprotocol/molecule-lab-contributor-agent.git
-claude --plugin-dir /path/to/molecule-lab-contributor-agent
+curl -LsSf https://astral.sh/uv/install.sh | sh    # macOS / Linux
+# or: brew install uv
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv --version                                        # confirm it is on PATH
 ```
 
-or from GitHub:
+You do **not** need to install Python, create a virtualenv, or run `pip`. uv does all of it.
+
+### 2. Install the plugin
 
 ```
 /plugin marketplace add moleculeprotocol/molecule-lab-contributor-agent
 /plugin install molecule-lab-contributor-agent@molecule-lab-contributor-agent-marketplace
 ```
 
-Installing as a plugin brings the MCP server with it — `.mcp.json` points at
-`mcp/server.py` and uv does the rest.
+or from a clone:
 
-**Any other MCP-capable agent** — point it at `mcp/server.py` with
-`uv run /path/to/mcp/server.py`, and give it
+```bash
+git clone https://github.com/moleculeprotocol/molecule-lab-contributor-agent.git
+claude --plugin-dir /path/to/molecule-lab-contributor-agent
+```
+
+### How the Python dependencies get installed
+
+There is no `requirements.txt`, and that is deliberate — **the dependency list lives inside
+`mcp/server.py` itself**, in a [PEP 723](https://peps.python.org/pep-0723/) block at the top:
+
+```python
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["mcp>=1.2.0", "httpx>=0.27", "cryptography>=42", "eth-account>=0.13.7"]
+# ///
+```
+
+`.mcp.json` starts the server with `uv run .../mcp/server.py`. uv reads that block, resolves
+the four dependencies (about 50 packages once transitive ones are counted), fetches a Python
+that satisfies `requires-python` if yours does not, and runs it — all into a shared cache.
+First start takes roughly half a minute and about 130 MB; every start after that is instant.
+Nothing is compiled from source, so no build toolchain is needed on any platform.
+
+One list, in one place, that cannot drift from the code that imports it.
+
+**If the server does not connect**, check `uv --version` first — a missing uv shows up only as
+`command not found` in the MCP logs, which is easy to miss.
+
+**Any other MCP-capable agent** — point it at `uv run /path/to/mcp/server.py` and give it
 `skills/molecule-lab-contributor/SKILL.md` as context.
 
 ## Configuration

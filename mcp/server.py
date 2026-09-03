@@ -386,7 +386,6 @@ _DEK_VAULT: dict[str, tuple[str, float]] = {}
 # Fail-closed latches. Process-local, no override, cleared only by a server restart.
 _CONFIDENTIAL_PLAINTEXT_HASHES: set[str] = set()
 _CONFIDENTIAL_PLAINTEXT_PATHS: set[str] = set()
-_CONFIDENTIAL_LABS: set[str] = set()
 
 # The staged, human-approved plan. One at a time, deliberately.
 _PLAN: dict[str, Any] | None = None
@@ -417,11 +416,6 @@ def mark_confidential(file_path: str, plaintext_sha256: str) -> None:
         pass
 
 
-def mark_confidential_lab(ocl_id: str) -> None:
-    if ocl_id and ocl_id.strip():
-        _CONFIDENTIAL_LABS.add(ocl_id.strip().lower())
-
-
 def assert_not_confidential_plaintext(file_path: str, data: bytes) -> None:
     """Refuse to upload the plaintext of a file encrypted for a private upload.
 
@@ -443,16 +437,21 @@ def assert_not_confidential_plaintext(file_path: str, data: bytes) -> None:
         )
 
 
-def assert_confidential_finalize_ok(ocl_id: str, access_level: str, has_metadata: bool) -> None:
-    if (ocl_id or "").strip().lower() not in _CONFIDENTIAL_LABS:
+def assert_confidential_finalize_ok(plan: dict, has_metadata: bool) -> None:
+    """A plan the human chose as private must never be finalized public or unencrypted.
+
+    Scoped to the PLAN, not the Lab. An earlier version latched the whole Lab, which meant
+    one private upload permanently refused every later public upload into the same data
+    room — a guard firing on the wrong thing, after the bytes had already been sent.
+    """
+    if plan.get("visibility") != "private":
         return
-    if access_level.upper() == "PUBLIC" or not has_metadata:
+    if plan.get("accessLevel", "").upper() == "PUBLIC" or not has_metadata:
         raise ToolError(
-            f"PRIVACY GUARD (not overridable): refusing to finalize a file for this Lab with "
-            f"access level {access_level or 'MISSING'} and encryption metadata "
-            f"{'present' if has_metadata else 'MISSING'}. Access conditions were built for this "
-            f"Lab, so its file must be finalized with a non-public access level AND encryption "
-            f"metadata. Do not fall back to the public path — abort and report the failure."
+            f"PRIVACY GUARD (not overridable): refusing to finalize a file the human chose as "
+            f"PRIVATE with access level {plan.get('accessLevel') or 'MISSING'} and encryption "
+            f"metadata {'present' if has_metadata else 'MISSING'}. Do not fall back to the "
+            f"public path — abort and report the failure."
         )
 
 
@@ -925,7 +924,7 @@ def save_credential(credential: str, envFile: str = ".env") -> str:
 
 
 @mcp.tool()
-def agent_wallet(create: bool = False, envFile: str | None = None) -> str:
+def agent_wallet(create: bool = False, envFile: str | None = None, replace: bool = False) -> str:
     """Report this agent's wallet address, or create its identity.
 
     Reachable with no upload details at all: getting an address to hand the human must never
@@ -949,6 +948,14 @@ def agent_wallet(create: bool = False, envFile: str | None = None) -> str:
             "usual answer. Ask the human first: generating a key with nowhere to put it wastes "
             "the Lab owner's role grant, because the next run would be a different agent."
         )
+    if env("MOLECULE_AGENT_PRIVATE_KEY") and not replace:
+        existing = _account().address
+        raise ToolError(
+            f"This agent already has an identity: {existing}. Creating another would discard "
+            f"it irrecoverably, and any role the Lab owner granted to {existing} would be left "
+            f"pointing at a wallet nobody holds — which then looks exactly like an indexer "
+            f"delay. If that is genuinely what the human wants, call again with replace=True."
+        )
     from eth_account import Account
 
     account = Account.create()
@@ -959,7 +966,7 @@ def agent_wallet(create: bool = False, envFile: str | None = None) -> str:
     return dump(
         {
             "address": account.address,
-            "envFile": str(Path(envFile).expanduser()),
+            "envFile": str(Path(envFile).expanduser().resolve()),
             "action": f"{action} MOLECULE_AGENT_PRIVATE_KEY",
             "permissions": "0600" if os.name != "nt" else "not enforced on Windows",
             "next_step": (
@@ -1017,6 +1024,32 @@ def envelope_self_test() -> str:
 # ==========================================================================
 
 
+# Sub-pages the human may well be standing on when asked to paste the address bar — the
+# flow sends them to Members to grant the role, so that is the likeliest paste of all.
+_LAB_SUBPAGES = {
+    "members", "settings", "files", "token", "updates", "overview", "activity",
+    "trl-analysis", "real-world-assets", "data-room", "announcements",
+}
+
+
+def _shortname_from(raw: str) -> str:
+    """Pull a Lab's short name out of whatever the human pasted.
+
+    Takes the segment after a /labs/ or /projects/ marker rather than the last segment,
+    so a sub-page URL still resolves. Falls back to the last meaningful segment.
+    """
+    path = raw.rstrip("/").split("?")[0].split("#")[0]
+    parts = [p for p in path.split("/") if p]
+    for marker in ("labs", "projects"):
+        if marker in parts:
+            index = parts.index(marker)
+            if index + 1 < len(parts):
+                return parts[index + 1].strip()
+    while parts and parts[-1].lower() in _LAB_SUBPAGES:
+        parts.pop()
+    return parts[-1].strip() if parts else ""
+
+
 @mcp.tool()
 def resolve_lab(labUrlOrName: str) -> str:
     """Turn a Lab URL or its short name into the OCL id every other tool needs.
@@ -1040,9 +1073,12 @@ def resolve_lab(labUrlOrName: str) -> str:
             )
         found_by = "the OCL id you gave"
     else:
-        shortname = raw.rstrip("/").split("?")[0].split("#")[0].rsplit("/", 1)[-1].strip()
+        shortname = _shortname_from(raw)
         if not shortname:
-            raise ToolError(f"Could not read a Lab name out of {labUrlOrName!r}.")
+            raise ToolError(
+                f"Could not read a Lab name out of {labUrlOrName!r}. Ask the human for the "
+                f"address of their Lab page — anything containing /labs/<name> works."
+            )
         lab = graphql(Q_LAB_BY_NAME, {"shortname": shortname}).get("labWithDataRoomAndFiles")
         if not lab:
             raise ToolError(
@@ -1554,12 +1590,40 @@ def confirm_upload_plan(planId: str, humanApproval: str) -> str:
             f"shown to the human. Re-stage it and show them the new one."
         )
     text = (humanApproval or "").strip()
-    if len(text) < 2 or text.lower() in {
-        "n/a", "none", "tbd", "assumed", "implied", "pending", "ok?", "-",
-    }:
+    lowered = text.lower()
+    placeholders = {"n/a", "none", "tbd", "assumed", "implied", "pending", "ok?", "-"}
+    # A refusal is not an approval. This check exists because the failure it prevents is the
+    # one this whole design is for: an agent that faithfully quotes "no, wait — make it
+    # private" and, without this, is told "now run it".
+    refusals = {
+        "no", "nope", "n", "nah", "stop", "wait", "hold on", "hold", "cancel", "abort",
+        "not yet", "later", "unsure", "not sure", "maybe", "don't", "dont", "do not",
+    }
+    negated = re.match(r"^(no|nope|nah|not|don'?t|do not|stop|wait|cancel|hold)\b", lowered)
+    if len(text) < 2 or lowered in placeholders:
         raise ToolError(
             f"{text!r} is not an approval from the human. Ask them directly, and quote what "
             f"they say."
+        )
+    if lowered in refusals or negated:
+        raise ToolError(
+            f"{text!r} reads as a refusal or a hesitation, not an approval. Nothing has been "
+            f"uploaded. Ask the human what they want changed, then call stage_upload again "
+            f"with the correction — never confirm a plan they did not agree to."
+        )
+    # Require something that actually assents, or a restatement of the visibility, so a
+    # neutral remark cannot be mistaken for a decision.
+    affirmative = any(
+        w in lowered
+        for w in ("yes", "yeah", "yep", "ok", "okay", "sure", "go ahead", "confirm", "approve",
+                  "correct", "right", "do it", "proceed", "publish", "upload", "fine",
+                  _PLAN["visibility"])
+    )
+    if not affirmative:
+        raise ToolError(
+            f"{text!r} does not clearly approve this plan. Ask the human to confirm in plain "
+            f"terms — naming the visibility ({_PLAN['visibility'].upper()}) is ideal — and "
+            f"quote that answer."
         )
     _PLAN["confirmed"] = True
     _PLAN["confirmation"] = text
@@ -1607,7 +1671,7 @@ def _put(upload: dict, data: bytes) -> None:
 
 
 def _finish(plan: dict, upload_token: str, metadata: dict | None) -> dict:
-    assert_confidential_finalize_ok(plan["oclId"], plan["accessLevel"], bool(metadata))
+    assert_confidential_finalize_ok(plan, bool(metadata))
     account = _account()
     return assert_ok(
         graphql(
@@ -1682,6 +1746,14 @@ def upload_private_file(planId: str) -> str:
     if plan["visibility"] != "private":
         raise ToolError("This plan is PUBLIC. Call upload_public_file.")
 
+    # Latch the file as confidential the moment a private upload is attempted. An earlier
+    # version armed this only after encryption, so a run that aborted on the documented
+    # indexer-lag failure left nothing latched — and an immediate public re-stage of the
+    # same file would have published its plaintext.
+    mark_confidential(
+        plan["filePath"], hashlib.sha256(Path(plan["filePath"]).read_bytes()).hexdigest()
+    )
+
     envelope_self_test()  # prove the format before trusting it with a confidential file
     check_onchain_access(plan["oclId"], plan["conditionRole"])
 
@@ -1695,13 +1767,10 @@ def upload_private_file(planId: str) -> str:
         raise ToolError("The access conditions must keep the literal :userAddress placeholder.")
     if conditions[2]["functionParams"][1].lower() != plan["labAccountAddress"].lower():
         raise ToolError("The access conditions do not name this Lab's account. Aborting.")
-    mark_confidential_lab(plan["oclId"])
-
     dek = assert_ok(graphql(M_DEK).get("generateDataEncryptionKey"), "generateDataEncryptionKey")
     handle = put_dek(dek["plaintextDEK"])  # the plaintext key never enters a tool result
     plaintext = Path(plan["filePath"]).read_bytes()
     encrypted = encrypt_bytes(plaintext, get_dek(handle))
-    mark_confidential(plan["filePath"], encrypted["contentHash"])
     del plaintext
 
     # The declared length must be the CIPHERTEXT length; the plaintext length produces a
@@ -1890,6 +1959,10 @@ def read_data_room_file(oclId: str, path: str, outPath: str) -> str:
         key = decrypt_data_key(oclId, stored["path"])
         blob = decrypt_bytes(blob, key.get("iv") or metadata["iv"], key["plaintextDEK"])
     target = Path(outPath).expanduser()
+    if metadata:
+        # Someone chose to encrypt this. The decrypted copy is just as confidential, so
+        # latch it against ever being uploaded as a public file by this process.
+        mark_confidential(str(target), hashlib.sha256(blob).hexdigest())
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(blob)
     return dump(

@@ -2,7 +2,10 @@
   "mcpServers": {
     "mol-labs": {
       "command": "uv",
-      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/mcp/server.py"]
+      "args": [
+        "run",
+        "${CLAUDE_PLUGIN_ROOT:-.}/mcp/server.py"
+      ]
     }
   }
 }

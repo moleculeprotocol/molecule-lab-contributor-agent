@@ -14,6 +14,9 @@ Everything runs through the `mol-labs` MCP server that ships with this skill. Ea
 returns a `next_step` telling you what to do and what to ask — follow it rather than
 improvising, and stop where it tells you to stop.
 
+If those tools are not available to you, **stop and say so.** Do not hand-roll an upload:
+every safeguard described below lives in that server, not in this document.
+
 ---
 
 ## The one rule
@@ -58,7 +61,7 @@ data room it is the dangerous one.
 |---|---|
 | **A Molecule API credential** | The `mol_…` string. **Think of it as an API key** — it identifies whose calls these are, counts against their quota, and can be revoked. It is not a wallet, holds no funds, and signs nothing. |
 | **Their Lab** | Whichever Lab they want you writing into. Nobody needs to hunt for its id — see below. |
-| **[uv](https://docs.astral.sh/uv/)** | The only install. `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or `brew install uv`. It fetches the server's dependencies *and* a Python to run them on, the first time it runs. Nothing else to set up, and nothing is compiled. |
+| **[uv](https://docs.astral.sh/uv/)** | The one thing they install, and installing the plugin does **not** install it: `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or `brew install uv`. The server's dependencies are declared inside `mcp/server.py` itself, so uv fetches them — and a Python to run them on — the first time it starts. Nothing to configure, nothing compiled. If the server will not connect, check `uv --version` before anything else. |
 
 ### Where the API credential comes from
 
@@ -147,6 +150,17 @@ visibility, the path, the description — call `stage_upload` again with the cor
 Do not paraphrase an approval they never gave. The server rejects placeholders like `n/a`
 precisely because that is the failure this whole design is guarding against.
 
+### The other tools
+
+Three you will not usually call yourself, listed so you know they exist:
+
+- `check_onchain_access` — reads the Lab's access resolver directly to confirm a private
+  file's lock will be evaluatable *and* will admit this agent. `upload_private_file` runs it
+  automatically; call it on its own when diagnosing a decrypt failure.
+- `envelope_self_test` — proves this server's encryption still matches the data-room format.
+  No network, no credentials. Also run automatically before any private upload.
+- `read_data_room_file` / `list_data_room_files` — reading the Lab, covered below.
+
 ### Step 8 — say what happened
 
 `verify_upload` re-reads the committed file, and for a private upload it downloads the stored
@@ -172,8 +186,8 @@ round — but the reason it has to refuse is that the API itself would happily a
 
 Say so immediately, in your next message, before anything else. Then:
 
-- A file's access level can be changed afterwards, and a path can be deleted. Both are
-  available to a Contributor.
+- A file's access level can be changed afterwards, and a path can be deleted — but **not
+  through this skill**. It ships no tool for either; the human does both in the app.
 - **Neither un-publishes anything.** Relabelling a file does not encrypt bytes that were
   stored in the clear, and it does not un-download what somebody already fetched.
 
@@ -233,6 +247,7 @@ You do not own a Lab and you never create one.
 | A tool says the credential looks wrong | It was pasted with a `Bearer` prefix, or an extra API-key header was added | Send it verbatim and alone. |
 | `No Lab named '…' here` | Wrong paste, or the credential is for a different deployment than the Lab | Ask for the full URL from the address bar of their Lab page. |
 | The agent has no role even though they say they added it | The role indexer is still catching up | Wait and call `lab_members` again. Do not re-issue the token or ask for another grant. |
+| The agent's address is not the one they granted | A second `agent_wallet(create=True)` would have replaced the identity — it now refuses unless you pass `replace=True` | Compare `agent_wallet()`'s address against the Members panel before blaming the indexer. |
 | The agent holds `VIEWER` | A Viewer can read but never upload | Ask them to change it to Contributor, and do not retry until they have. |
 | A write fails as unauthorized shortly after the grant | The same indexer lag, on the write path | Wait and retry. Re-issuing the token will not help. |
 | `'…' already exists in this data room` | That path is taken, permanently | Ask for a different path, or add a new version with `ref=`. |
