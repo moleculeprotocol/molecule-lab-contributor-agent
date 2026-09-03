@@ -1,626 +1,279 @@
 ---
 name: molecule-lab-contributor
-description: Work inside a Molecule Lab that someone else owns. Use when a human has created a Lab in the Molecule Labs app and wants their agent to upload files into it — the agent generates its own wallet, reports the address so the human can grant it the Contributor role, self-issues a service token, then reads and writes the Lab's data room. This lane owns no Lab, mints nothing, and spends nothing — no gas, no USDC, no x402. For creating or minting a new Lab, use a different skill.
+description: Write files into a Molecule Lab that a human owns. Use when someone has made a Lab in the Molecule Labs app and wants their agent to put files in its data room — the agent creates its own wallet, they grant it the Contributor role, it issues its own token, and then it reads and writes the Lab. Uploads are either public (plaintext, anyone can download) or private (encrypted, only people with a role can open) — the human always chooses, and every upload is read back to them and confirmed before anything is written. This skill owns no Lab, creates none, and spends nothing.
 license: Apache-2.0
 ---
 
 # Molecule Lab Contributor
 
-A human owns the Lab. You get your own identity, they grant it a role, and from then
-on you authenticate as yourself. **You never receive the human's private key, token, or
+A human owns the Lab. You get your own identity, they grant it a role, and from then on you
+authenticate as yourself. **You never receive their private key, their token, or their
 session**, and they can revoke you with one click without touching anything else.
 
-## What this skill is not
+Everything runs through the `mol-labs` MCP server that ships with this skill. Each tool
+returns a `next_step` telling you what to do and what to ask — follow it rather than
+improvising, and stop where it tells you to stop.
 
-This is the **contributor** lane. You do not own a Lab and you never create one.
+If those tools are not available to you, **stop and say so.** Do not hand-roll an upload:
+every safeguard described below lives in that server, not in this document.
 
-- Do **not** mint a LabNFT. Do **not** call `createLab`. If no Lab is named, ask for the
-  `oclId` — never create one to proceed.
-- You need **no funds**: no gas, no USDC, no x402 payment. Your key signs exactly one
-  off-chain message and never sends a transaction. If you find yourself needing a funded
-  wallet, you are on the wrong path — stop and re-read this file.
-- Owner-only surfaces you cannot reach as a Contributor: `updateLabNftMetadata`,
-  `generateLabImageUploadUrl`, and the legal-agreement mutations. Do not try them.
+---
 
-## Prerequisites
+## The one rule
+
+**Never decide for the human whether a file is public or private.** Ask, every single time,
+before anything is uploaded.
+
+A data room is not a scratch directory. A public file is downloadable by anyone with the
+link from the moment it lands, a path can never be reused, and nothing un-publishes what has
+already been fetched. "They didn't say, so I published it" is the one outcome this skill
+exists to prevent.
+
+So there is no default visibility anywhere in this skill, and the server will not let you
+invent one: `stage_upload` records what you are about to do and hands it back for the human
+to approve, and every upload tool refuses to run until `confirm_upload_plan` has recorded
+their actual answer.
+
+Ask it in their words, not the API's:
+
+> Should this be **public** — anyone with the link can download it, permanently — or
+> **private** — encrypted, so only you and the Contributors on this Lab can open it?
+
+If they are unsure, the honest framing is: *if it contains anything you would not put on a
+public website, choose private.* Do not treat public as the safe default — for a research
+data room it is the dangerous one.
+
+> ### The access level is a label, not a lock
+>
+> These are two independent things and the server enforces no relationship between them.
+> Marking a file private-looking while uploading plaintext **succeeds**, stores your
+> plaintext, and shows a row that looks confidential. Nothing on the server encrypts
+> anything. A file is encrypted only because it was encrypted before being uploaded.
+>
+> That is why the private path is its own tool (`upload_private_file`) rather than a flag.
+> Use it, and never hand-roll an upload that merely sets the label.
+
+---
+
+## What the human needs
 
 | | |
 |---|---|
-| **Consumer credential** | A `mol_<consumerId>_<secret>` string. The human supplies it. Treat the whole string as a secret. |
-| **`oclId`** | The Lab's canonical 32-byte id, e.g. `0x0101…0042`. The human copies it from the Lab in the app. |
-| **Node 18+** | For `fetch` and `viem`. Install viem with `npm i viem` in a scratch directory. |
+| **A Molecule API credential** | The `mol_…` string. **Think of it as an API key** — it identifies whose calls these are, counts against their quota, and can be revoked. It is not a wallet, holds no funds, and signs nothing. |
+| **Their Lab** | Whichever Lab they want you writing into. Nobody needs to hunt for its id — see below. |
+| **[uv](https://docs.astral.sh/uv/)** | The one thing they install, and installing the plugin does **not** install it: `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or `brew install uv`. The server's dependencies are declared inside `mcp/server.py` itself, so uv fetches them — and a Python to run them on — the first time it starts. Nothing to configure, nothing compiled. If the server will not connect, check `uv --version` before anything else. |
 
-Read all three from the environment. Pass them inline, or put them in a `.env` (see
-`.env.example` in this repo) and load it with Node's built-in flag — no dependency:
-`node --env-file=.env agent-upload.mjs ./file.csv`. Persist `AGENT_PRIVATE_KEY` there:
-a new key on the next run is a different agent with no role on the Lab.
+### Where the API credential comes from
 
-Never print the consumer credential, the service token, or the agent private key into
-your reply. Read them from the environment.
+- Webinar and starter-pack users: **it is in the starter pack.** Ask them to look there first.
+- Otherwise the Molecule team issues them — ask on the
+  [Molecule Discord](https://t.co/L0VEiy4Bjk). There is no self-serve page, so do not send
+  them hunting for one, and never try to generate one yourself.
 
-## Constants
+Once they hand it over, store it with `save_credential(credential="mol_…")`, which writes it
+to `.env` at mode 0600 so later sessions pick it up. Do not paste it back into the chat.
 
-Default — **staging** (Base Sepolia). Use these unless the human explicitly says production:
+### Finding their Lab — just ask for the URL
 
-```
-GRAPHQL_URL   https://staging.graphql.api.molecule.xyz/graphql
-LAB_APP_URL   https://testnet.labs.molecule.xyz
-CHAIN         baseSepolia (84532)
-```
-
-Production (Base) — swap these two in, nothing else on this page changes:
+The Lab's canonical id is a 32-byte hex string, and **the human should never have to go
+looking for it.** Ask them to open their Lab in the app and paste the address bar:
 
 ```
-GRAPHQL_URL   https://production.graphql.api.molecule.xyz/graphql
-LAB_APP_URL   https://labs.molecule.xyz
-CHAIN         base (8453)
+https://labs.molecule.xyz/labs/their-lab-name
+                               ^^^^^^^^^^^^^^ this is all that is needed
 ```
 
-## Headers
+Give the whole URL to `resolve_lab` and it returns the id, the display name, and the Lab's
+account address. The bare name works too, and so does the id itself if they happen to have
+one.
 
-```
-Content-Type:    application/json
-Authorization:   mol_<consumerId>_<secret>     # NEVER prefixed with "Bearer"
-X-Service-Token: <JWT>                         # mutations only; omit entirely until you have one
-```
+Then **say which Lab you resolved** — "that's *Their Lab Name*, correct?" — so a wrong paste
+is caught before an upload rather than after one.
 
-Three rules, each of which has broken a real run:
+### A note on `.env`
 
-1. **No `Bearer`** in front of a `mol_` credential. `Bearer` is reserved for Privy user
-   tokens; adding it fails authentication.
-2. **Never send `x-api-key` as well.** The API's default auth mode is the shared API key,
-   so a request carrying both headers is authenticated as the shared key and your
-   consumer credential is ignored entirely. Send `Authorization` alone.
-3. **Omit `X-Service-Token` rather than sending an empty one.** Public queries need only
-   `Authorization`; an empty token header is worse than no header.
+The two secrets live in a `.env` file beside the project, and the server reads it at
+startup. Two things worth telling the human once:
 
-## Error contract
+- On macOS `.env` is **hidden in Finder** — `Cmd+Shift+.` toggles hidden files.
+- The server reads its configuration **once, when it starts.** If they edit `.env`,
+  reconnect the server (`/mcp` in Claude Code) or the change will look like it did nothing.
 
-- **Queries throw.** Failure lands in top-level `errors[]`; branch on `errors[i].errorType`.
-- **Mutations return errors in-band.** Every result type has `error: ApiError`.
-  **Success ⇔ `error == null`** — never a truthy payload field, never a `message` string.
-  Select `error { code message requestId retryable details }` on every mutation.
-- **Parse `details` tolerantly.** It is an object on thrown query errors, a JSON string
-  in-band, and currently a *doubly-encoded* JSON string in-band — one `JSON.parse` there
-  returns a string and `.reason` is silently `undefined`. Loop until it is not a string.
-- Branch on `code`, never on `message`. Retry only when `retryable` is true. Quote
-  `requestId` in any bug report.
-- Codes: `UNAUTHENTICATED`, `UNAUTHORIZED`, `NOT_FOUND`, `VALIDATION_FAILED`, `CONFLICT`,
-  `FAILED_PRECONDITION`, `COMPLEXITY_LIMIT_EXCEEDED`, `RATE_LIMITED`\*, `TIMEOUT`\*,
-  `UPSTREAM_UNAVAILABLE`\*, `INTERNAL_ERROR`\* (\* = retryable). Treat an unrecognised
-  code as non-retryable, and surface it rather than swallowing it.
+`save_credential`, `agent_wallet(create=True, …)` and `issue_service_token(…, envFile=…)` all
+write into that file for them, so nobody has to hand-edit it.
 
 ---
 
-# The flow
+## The flow
 
-| # | Actor | Action |
-|---|---|---|
-| 1 | Agent | Generate a wallet, report the address |
-| 2 | **Human** | Add that address to the Lab as **Contributor** |
-| 3 | Agent | Poll until the grant is visible |
-| 4 | Agent | Self-issue a service token |
-| 5 | Agent | Upload |
-| 6 | Agent | Verify, and give the human a link |
+Eight steps. **Each one ends with something to tell or ask the human** — the point is not to
+sprint to the upload, it is that nothing irreversible happens without them knowing.
 
-**Run the phases in this order.** Phase 3 must complete before phase 4 — see the note on
-the nonce there. It is the single most common way this flow fails.
+| # | Tool | You do | You then |
+|---|---|---|---|
+| 1 | `config_doctor` | See what is configured | Show them `issues` and `fixes`, in that order |
+| 2 | `save_credential` | Store their `mol_…` credential | Confirm it is saved; never echo it back |
+| 3 | `agent_wallet(create=True)` | Create this agent's identity | Give them the address and **stop** |
+| 4 | `resolve_lab` | Turn their Lab URL into an id | Confirm which Lab you found |
+| 5 | `lab_members` | Check the grant landed | If it has not, wait — do not spin |
+| 6 | `issue_service_token` | Authenticate this agent's writes | Tell them the token's name and expiry |
+| 7 | `lab_info` → `file_categories_and_tags` → `stage_upload` | Prepare one upload | **Read the plan back and wait for a yes** |
+| 8 | `confirm_upload_plan` → `upload_public_file` or `upload_private_file` → `verify_upload` | Do it, then prove it | Say the visibility out loud and give them the link |
 
-## Phase 1 — Generate the agent wallet
+**Credential before wallet.** Step 2 comes before step 3 for a reason: a wallet created
+before the credential is in place cannot look anything up, and the next step then fails for
+a reason that has nothing to do with the wallet. `config_doctor` orders its `fixes` that way
+— work through them in order.
 
-```javascript
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+### Step 3 — hand over the address, then stop
 
-if (!process.env.AGENT_PRIVATE_KEY) {
-  // Generate ONCE, hand the key to the human to store, then STOP. Do not carry on:
-  // a wallet nobody has granted a role to can never get past phase 3.
-  console.log("AGENT_PRIVATE_KEY=" + generatePrivateKey());
-  throw new Error("Store that key, get the role granted for its address, then re-run.");
-}
-const agentAccount = privateKeyToAccount(process.env.AGENT_PRIVATE_KEY);
-console.log("Agent wallet address:", agentAccount.address);
-```
+`agent_wallet(create=True, envFile=".env")` returns an address and nothing else. Tell them:
 
-**Persist the key.** If `AGENT_PRIVATE_KEY` is not already set, write the generated key
-somewhere durable (an `.env` the human controls, or their secret store) and tell them to
-keep it. A new key on the next run is a *different agent* with no role, and the human
-would have to grant the role again.
+> This agent's address is `0x…`. In the Labs app, open your Lab → **Members** → add that
+> address with the **Contributor** role, then tell me when it's done.
 
-Print the **address** only. Never print the private key into your reply or into a file
-you also show. This key is yours, not the human's — it is not their wallet and must
-never be asked for.
+Then **actually stop.** Only the Lab owner can grant a role, and a Viewer can read but never
+upload, so Contributor is the one that matters. Do not poll in a silent loop.
 
-## Phase 2 — Report the address, then stop
+The key is saved in `.env`. Tell them to keep it: a new key is a *different agent* with no
+role, and they would have to grant it all over again.
 
-Tell the human, in plain terms:
+### Step 7 — the confirmation gate
 
-> My wallet address is `0x…`. In the Labs app, open your Lab → Members → add this
-> address with the **Contributor** role. Tick "is agent" and set an expiry that matches
-> how long you want me working on this. Tell me when it's done.
+`stage_upload` takes every answer the human gave you and returns three things: a
+plain-language `summary`, a list of `ask_the_human` questions, and any `warnings`. Put all of
+it in front of them and **wait**.
 
-Then **stop and wait**. Do not poll silently for minutes with no output, and do not try
-to grant the role yourself — only the Lab **Owner** can grant Contributor.
+If they approve, pass their own words to `confirm_upload_plan`. If they change anything — the
+visibility, the path, the description — call `stage_upload` again with the correction.
 
-Why Contributor and not Viewer: a Viewer can read and decrypt but cannot write.
-Uploading requires Contributor.
+Do not paraphrase an approval they never gave. The server rejects placeholders like `n/a`
+precisely because that is the failure this whole design is guarding against.
 
-The human's grant is one on-chain call on the `AccessResolver`, and the app sponsors the
-gas:
+### The other tools
 
-```solidity
-function grantRole(bytes32 oclId, address account, uint8 role, uint64 expiry, bool isAgent);
-// role: 2 = ROLE_CONTRIBUTOR, 1 = ROLE_VIEWER
-```
+Three you will not usually call yourself, listed so you know they exist:
 
-## Phase 3 — Poll until the grant is visible
+- `check_onchain_access` — reads the Lab's access resolver directly to confirm a private
+  file's lock will be evaluatable *and* will admit this agent. `upload_private_file` runs it
+  automatically; call it on its own when diagnosing a decrypt failure.
+- `envelope_self_test` — proves this server's encryption still matches the data-room format.
+  No network, no credentials. Also run automatically before any private upload.
+- `read_data_room_file` / `list_data_room_files` — reading the Lab, covered below.
 
-Public query — `Authorization` only, no service token needed.
+### Step 8 — say what happened
 
-```graphql
-query ListLabMembers($oclId: String!) {
-  listLabMembers(oclId: $oclId) {
-    message
-    members { walletAddress role source isAgent expiry grantedAt }
-  }
-}
-```
+`verify_upload` re-reads the committed file, and for a private upload it downloads the stored
+bytes and decrypts them, because a successful upload proves nothing about the encryption on
+its own.
 
-This is a **query**, so it has no `error` field — a failure arrives as a thrown
-top-level `errors[]`, not in the payload. (Some older published examples show
-`isSuccess` / `error` here; that contract was removed.)
+Then tell them explicitly **which visibility it went up as**, and give them the link. If it
+was private, ask them to confirm they can open it in the app — that is the only check that
+proves the *owner*, not just this agent, can read it.
 
-Match on `walletAddress.toLowerCase() === agentAddress.toLowerCase()` — addresses come
-back lowercased. Poll every 5s for up to ~5 minutes.
+---
 
-- `role: "CONTRIBUTOR"` (or `"OWNER"`) → proceed to phase 4.
-- `role: "VIEWER"` → **stop and say so.** Do not retry; a Viewer will never be able to
-  upload. Ask the human to change the role to Contributor.
-- No entry at all → the grant has not landed (or was never made, or has expired —
-  expired grants are excluded from this list entirely). Keep polling, then ask.
+## Fail closed
 
-`isAgent` merely echoes the flag the owner set; `false` there changes nothing about what
-you may do, so do not treat it as a failed grant. `expiry` is unix seconds as a decimal
-string, or `null` for a permanent grant.
+Once a file has been chosen as private, **there is no public fallback.** If any part of the
+private path fails, stop and report it.
 
-## Phase 4 — Self-issue a service token
+Do not re-run it as public, do not upload the plaintext, do not finalize it with a public
+label. The server refuses all three once a file has been encrypted and will not be talked
+round — but the reason it has to refuse is that the API itself would happily accept them.
 
-**Do this only after phase 3 has succeeded.** The sign-in message embeds a **single-use
-nonce that expires 10 minutes after it is issued**. If you fetch it and then wait for the
-human, it will be dead by the time you sign it.
+## If you published the wrong thing
 
-```graphql
-query GetServiceSignInMessage($walletAddress: String!, $serviceName: String!) {
-  getServiceSignInMessage(walletAddress: $walletAddress, serviceName: $serviceName) {
-    message
-    expiresAt
-  }
-}
-```
+Say so immediately, in your next message, before anything else. Then:
 
-Sign the returned `message` **verbatim**, as a plain personal message (EIP-191
-`personal_sign` — **not** typed data). Do not reformat it, do not trim it, do not rebuild
-the string yourself: the server recomposes it byte-identically and any difference fails
-verification.
+- A file's access level can be changed afterwards, and a path can be deleted — but **not
+  through this skill**. It ships no tool for either; the human does both in the app.
+- **Neither un-publishes anything.** Relabelling a file does not encrypt bytes that were
+  stored in the clear, and it does not un-download what somebody already fetched.
 
-```javascript
-const messageSignature = await agentAccount.signMessage({
-  message: signIn.getServiceSignInMessage.message,
-});
-```
+Treat the content as disclosed and let the human decide what to do about it. This is exactly
+why the gate exists.
 
-```graphql
-mutation GenerateServiceToken(
-  $serviceName: String!
-  $walletAddress: String!
-  $messageSignature: String!
-  $expiresIn: String
-) {
-  generateServiceToken(
-    serviceName: $serviceName
-    walletAddress: $walletAddress
-    messageSignature: $messageSignature
-    expiresIn: $expiresIn
-  ) {
-    token tokenId expiresAt
-    error { code message requestId retryable details }
-  }
-}
-```
-
-- `serviceName` is free-form. Use something identifying, e.g. `"research-agent-1"`.
-- `expiresIn` format is `<int><unit>`, unit one of `s m h d w M y`, bounds 1 hour to
-  2 years. The backend default is `180d`; prefer `"30d"`, or match the role grant's expiry.
-- The token goes in `X-Service-Token` on everything from here on. **It is wallet-bound,
-  not Lab-bound** — authorisation is resolved per request from your wallet's role on the
-  Lab you name, so one token works across every Lab you hold a role on.
-
-Issuance is **not** gated on holding a role — any wallet can mint a token for itself. The
-role is what makes the token *useful*. A token issued before the grant lands keeps
-working once it does; you never need to re-issue it because of a permissions error.
-
-## Phase 5 — Upload
-
-Three calls. Wrap the whole sequence in the retry helper below.
-
-**5a — initiate:**
-
-```graphql
-mutation Initiate($oclId: String!, $contentType: String!, $contentLength: Int!) {
-  initiateCreateOrUpdateFile(oclId: $oclId, contentType: $contentType, contentLength: $contentLength) {
-    uploadToken uploadUrl uploadUrlExpiry method headers { key value }
-    error { code message requestId retryable details }
-  }
-}
-```
-
-**5b — PUT the raw bytes** to `uploadUrl` using the returned `method` and **exactly** the
-returned `headers`, converted from the `[{key,value}]` array to an object. Do not add,
-drop, or reorder headers. Presigned URLs expire in ~15 minutes. This call goes to S3, not
-to the API — send no `Authorization` and no `X-Service-Token`.
-
-**5c — finish:**
-
-```graphql
-mutation Finish(
-  $oclId: String!, $uploadToken: String!, $path: String!, $accessLevel: String!,
-  $changeBy: String!, $description: String, $tags: [String!], $categories: [String!],
-  $contentText: String
-) {
-  finishCreateOrUpdateFile(
-    oclId: $oclId, uploadToken: $uploadToken, path: $path, accessLevel: $accessLevel,
-    changeBy: $changeBy, description: $description, tags: $tags, categories: $categories,
-    contentText: $contentText
-  ) {
-    datasetId contentHash version
-    error { code message requestId retryable details }
-  }
-}
-```
-
-- `contentType` in 5a is **stored and shown to the human** — send the file's real MIME
-  type (`text/csv`, `application/pdf`, `image/png`). `application/octet-stream` is
-  accepted but leaves the file looking like an unidentified blob in the data room.
-- `accessLevel`: `"PUBLIC"` | `"HOLDERS"` | `"ADMIN"`.
-- `changeBy`: **your** wallet address — the file is attributed to you.
-- `path` for a **new** file; `ref` (a `datasetId`) for a **new version** of an existing
-  file. One or the other, never both. Underscores are fine — some older reference docs
-  say otherwise, but the API accepts them (verified against staging).
-- **Re-using an existing `path` fails.** A second upload to the same path returns
-  `UPSTREAM_UNAVAILABLE` / `MoleculeDataRoomPathOccupied` — "Path is occupied". Despite
-  that code sitting on the retryable list, **this is permanent**: retrying can never
-  succeed. To add a new version of a file, pass `ref` (its `datasetId`) instead of
-  `path`; otherwise choose a different path.
-- The stored path comes back **with a leading `/`** — you send `findings.csv` and
-  `dataRoom.files` reports `/findings.csv`. Match with `endsWith`, not `===`.
-- `categories` / `tags` are optional. If you set them, take valid values from the public
-  `fileCategoriesAndTags` query rather than inventing them.
-- `contentText` is optional searchable text, used for semantic search.
-
-### Retry `UNAUTHORIZED` right after the grant
-
-Role state reaches the API through an event indexer, so for a window after the human's
-grant confirms on-chain a write still returns `UNAUTHORIZED`. **This is not a permissions
-problem.** Re-issuing the token will not help, and asking the human to re-grant will not
-help. Wait and retry. Usually seconds; it has taken minutes.
-
-```javascript
-async function withIndexerLagRetry(fn, { codes = ["UNAUTHORIZED", "NOT_FOUND"], attempts = 12, baseMs = 2000, capMs = 30000 } = {}) {
-  const laggy = new RegExp(codes.join("|"));
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (!laggy.test(String(err)) || i === attempts - 1) throw err;
-      const delay = Math.min(baseMs * 2 ** i, capMs);   // 2s, 4s, 8s, 16s, then 30s
-      console.warn(`indexer not caught up (attempt ${i + 1}/${attempts}); retrying in ${delay / 1000}s`);
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-}
-```
-
-## Phase 6 — Verify and hand back
-
-```graphql
-query Verify($oclId: String!) {
-  labWithDataRoomAndFiles(oclId: $oclId) {
-    oclId shortname name
-    dataRoom { files { path contentType accessLevel version createdBy } }
-  }
-}
-```
-
-Public query, `Authorization` only. Confirm your `path` is in `dataRoom.files` and that
-`createdBy` matches your address. A `null` result means the Lab is not registered — this
-query is nullable and does not throw for a missing Lab.
-
-Then give the human the link: `<LAB_APP_URL>/projects/<shortname>`. They will see the
-file in the data room, attributed to your address, flagged as an agent in the members list.
+---
 
 ## Reading the data room
 
-A Contributor can read as well as write — useful when the job is "analyse what's already
-in the Lab, then write the results back". Public query, `Authorization` only:
+A Contributor can read as well as write, which is what makes "analyse what's already here,
+then write the results back" possible. `list_data_room_files` lists everything with its
+access level and whether it is encrypted; `read_data_room_file` downloads one and decrypts it
+if it needs to.
 
-```graphql
-query ReadDataRoom($oclId: String!) {
-  labWithDataRoomAndFiles(oclId: $oclId) {
-    shortname
-    dataRoom {
-      files {
-        path contentType contentHash version createdBy
-        downloadUrl downloadHeaders { key value } downloadUrlExpiry
-      }
-    }
-  }
-}
-```
+Note that the access level does not gate the *download*: a private file's ciphertext is
+fetchable by anyone who can query the Lab. The confidentiality is in the encryption, not the
+label — so never tell a human a private file "can't be downloaded". It can, as ciphertext
+nobody can read.
 
-`GET` the `downloadUrl` with exactly the returned `downloadHeaders` to fetch the bytes.
-The URL is presigned and short-lived — read `downloadUrlExpiry` and re-run the query
-rather than caching the URL.
+## What "private" actually buys them
 
-```javascript
-const headers = {};
-(file.downloadHeaders ?? []).forEach((h) => (headers[h.key] = h.value));
-const body = await (await fetch(file.downloadUrl, { headers })).text();
-```
+Be accurate about this if they ask, and do not oversell it. The file is AES-256-GCM
+encrypted, its key is wrapped by a managed key service, and every release of that key is
+gated by a fresh on-chain role check that fails closed. No other user, outsider or storage
+host can read it, and the owner can revoke access at any time.
 
-`contentHash` lets you confirm the bytes are intact. Note it is **not** a bare SHA-256 of
-the content — it is the data room's own multihash-style digest, so compare it between
-reads rather than recomputing it locally.
+It is **not** zero-knowledge. Molecule operates the key service, so Molecule's own
+infrastructure can decrypt the file. Never tell anyone "not even Molecule can open this."
 
-Files with a non-`PUBLIC` `accessLevel` are encrypted at rest and need the key-management
-flow, which this skill does not cover — their `downloadUrl` yields ciphertext.
+By default a private file is openable by the Lab's **Contributors and its owner**, but not by
+read-only **Viewers** — one notch tighter than a file the human uploads through the app
+themselves. `stage_upload` warns you about this every time; if they want everyone they have
+invited to be able to open it, pass `conditionRole="viewer"`.
 
 ---
 
-## Complete script
+## What this skill is not
 
-Self-contained. Run it with the agent's own key and the `oclId` of the human's Lab.
+You do not own a Lab and you never create one.
 
-```javascript
-#!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { basename, extname } from "node:path";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-
-// The stored contentType is what the human sees in the data room — send a real one.
-const MIME = {
-  ".csv": "text/csv", ".tsv": "text/tab-separated-values", ".json": "application/json",
-  ".txt": "text/plain", ".md": "text/markdown", ".pdf": "application/pdf",
-  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-};
-const mimeFor = (f) => MIME[extname(f).toLowerCase()] ?? "application/octet-stream";
-
-const GRAPHQL_URL = process.env.GRAPHQL_URL ?? "https://staging.graphql.api.molecule.xyz/graphql";
-const LAB_APP_URL = process.env.LAB_APP_URL ?? "https://testnet.labs.molecule.xyz";
-const SERVICE_NAME = process.env.SERVICE_NAME ?? "research-agent-1";
-
-const CONSUMER_CREDENTIAL = process.env.CONSUMER_CREDENTIAL;
-const OCL_ID = process.env.OCL_ID;
-const AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY;
-
-let serviceToken;
-
-async function graphql(query, variables) {
-  // Authorization ONLY — never also x-api-key, or the consumer credential is ignored.
-  const headers = { "Content-Type": "application/json", Authorization: CONSUMER_CREDENTIAL };
-  if (serviceToken) headers["X-Service-Token"] = serviceToken;
-  const res = await fetch(GRAPHQL_URL, { method: "POST", headers, body: JSON.stringify({ query, variables }) });
-  const { data, errors } = await res.json();
-  if (errors) throw new Error(JSON.stringify(errors));
-  return data;
-}
-
-// `details` is an object on thrown query errors, a JSON string in-band, and currently a
-// doubly-encoded JSON string in-band. Parse until it stops being a string.
-function parseDetails(details) {
-  let value = details;
-  for (let i = 0; i < 3 && typeof value === "string"; i++) {
-    try { value = JSON.parse(value); } catch { break; }
-  }
-  return value && typeof value === "object" ? value : {};
-}
-
-function assertOk(result, op) {
-  if (result.error) {
-    const { code, message, requestId } = result.error;
-    const { reason } = parseDetails(result.error.details);
-    throw new Error(`${op} failed: ${code}${reason ? `/${reason}` : ""}: ${message} (requestId ${requestId})`);
-  }
-  return result;
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function withIndexerLagRetry(fn, { codes = ["UNAUTHORIZED", "NOT_FOUND"], attempts = 12, baseMs = 2000, capMs = 30000 } = {}) {
-  const laggy = new RegExp(codes.join("|"));
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (!laggy.test(String(err)) || i === attempts - 1) throw err;
-      const delay = Math.min(baseMs * 2 ** i, capMs);
-      console.warn(`indexer not caught up (attempt ${i + 1}/${attempts}); retrying in ${delay / 1000}s`);
-      await sleep(delay);
-    }
-  }
-}
-
-async function main() {
-  const filePath = process.argv[2];
-  if (!filePath) throw new Error("Usage: node agent-upload.mjs <file-to-upload>");
-  if (!CONSUMER_CREDENTIAL) throw new Error("Set CONSUMER_CREDENTIAL to your mol_ credential");
-  if (!OCL_ID) throw new Error("Set OCL_ID to the oclId of the lab the human owns");
-
-  // ---- Phase 1: the agent's identity ----
-  if (!AGENT_PRIVATE_KEY) {
-    console.log("No AGENT_PRIVATE_KEY set. Generated one for this run only — store it, or");
-    console.log("the next run is a different agent with no role:\n");
-    console.log("  AGENT_PRIVATE_KEY=" + generatePrivateKey() + "\n");
-    throw new Error("Store that key, have the owner grant it Contributor, then re-run.");
-  }
-  const agentAccount = privateKeyToAccount(AGENT_PRIVATE_KEY);
-  console.log("1/6 Agent wallet:", agentAccount.address);
-
-  // ---- Phase 2/3: wait for the human's grant (public query, no service token) ----
-  // Poll first and only prompt on a miss — the human is often already ahead of you.
-  let grant, asked = false;
-  for (let i = 0; i < 60; i++) {
-    const members = await graphql(
-      `query ListLabMembers($oclId: String!) {
-        listLabMembers(oclId: $oclId) { members { walletAddress role isAgent expiry } }
-      }`,
-      { oclId: OCL_ID },
-    );
-    grant = members.listLabMembers.members.find(
-      (m) => m.walletAddress.toLowerCase() === agentAccount.address.toLowerCase(),
-    );
-    if (grant) break;
-    if (!asked) {
-      console.log("2/6 Ask the lab owner to add that address as Contributor (isAgent = true).");
-      asked = true;
-    }
-    await sleep(5000); // poll for up to 5 minutes
-  }
-  if (!grant) throw new Error("No role grant found for the agent wallet — ask the owner to add it");
-  if (grant.role === "VIEWER") throw new Error("Agent holds VIEWER; uploading needs CONTRIBUTOR");
-  console.log("3/6 Role:", grant.role, "expiry:", grant.expiry ?? "permanent");
-
-  // ---- Phase 4: self-issue a token ----
-  // Only now, after the poll returned. The sign-in message carries a single-use nonce
-  // that expires 10 minutes after issuance.
-  const signIn = await graphql(
-    `query GetServiceSignInMessage($walletAddress: String!, $serviceName: String!) {
-      getServiceSignInMessage(walletAddress: $walletAddress, serviceName: $serviceName) { message expiresAt }
-    }`,
-    { walletAddress: agentAccount.address, serviceName: SERVICE_NAME },
-  );
-  const messageSignature = await agentAccount.signMessage({
-    message: signIn.getServiceSignInMessage.message, // verbatim — never rebuild this string
-  });
-  const tokenResult = await graphql(
-    `mutation GenerateServiceToken($serviceName: String!, $walletAddress: String!, $messageSignature: String!, $expiresIn: String) {
-      generateServiceToken(serviceName: $serviceName, walletAddress: $walletAddress, messageSignature: $messageSignature, expiresIn: $expiresIn) {
-        token expiresAt
-        error { code message requestId retryable details }
-      }
-    }`,
-    { serviceName: SERVICE_NAME, walletAddress: agentAccount.address, messageSignature, expiresIn: "30d" },
-  );
-  assertOk(tokenResult.generateServiceToken, "generateServiceToken");
-  serviceToken = tokenResult.generateServiceToken.token;
-  console.log("4/6 Token issued, expires", tokenResult.generateServiceToken.expiresAt);
-
-  // ---- Phase 5: upload ----
-  const bytes = readFileSync(filePath);
-  const { datasetId } = await withIndexerLagRetry(async () => {
-    const initiated = await graphql(
-      `mutation Initiate($oclId: String!, $contentType: String!, $contentLength: Int!) {
-        initiateCreateOrUpdateFile(oclId: $oclId, contentType: $contentType, contentLength: $contentLength) {
-          uploadToken uploadUrl method headers { key value }
-          error { code message requestId retryable details }
-        }
-      }`,
-      { oclId: OCL_ID, contentType: mimeFor(filePath), contentLength: bytes.length },
-    );
-    assertOk(initiated.initiateCreateOrUpdateFile, "initiateCreateOrUpdateFile");
-    const { uploadToken, uploadUrl, method, headers } = initiated.initiateCreateOrUpdateFile;
-
-    const uploadHeaders = {};
-    headers.forEach((h) => (uploadHeaders[h.key] = h.value));
-    const put = await fetch(uploadUrl, { method: method || "PUT", headers: uploadHeaders, body: bytes });
-    if (!put.ok) throw new Error(`Upload failed: ${put.status}`);
-
-    const finished = await graphql(
-      `mutation Finish($oclId: String!, $uploadToken: String!, $path: String!, $accessLevel: String!, $changeBy: String!) {
-        finishCreateOrUpdateFile(oclId: $oclId, uploadToken: $uploadToken, path: $path, accessLevel: $accessLevel, changeBy: $changeBy) {
-          datasetId
-          error { code message requestId retryable details }
-        }
-      }`,
-      {
-        oclId: OCL_ID,
-        uploadToken,
-        path: basename(filePath),
-        accessLevel: "PUBLIC",
-        changeBy: agentAccount.address,
-      },
-    );
-    assertOk(finished.finishCreateOrUpdateFile, "finishCreateOrUpdateFile");
-    return finished.finishCreateOrUpdateFile;
-  });
-  console.log("5/6 Uploaded — datasetId:", datasetId);
-
-  // ---- Phase 6: verify ----
-  const verify = await graphql(
-    `query Verify($oclId: String!) {
-      labWithDataRoomAndFiles(oclId: $oclId) {
-        shortname
-        dataRoom { files { path accessLevel version createdBy } }
-      }
-    }`,
-    { oclId: OCL_ID },
-  );
-  const lab = verify.labWithDataRoomAndFiles;
-  // Nullable by design: null means the lab is not registered, and the query does not throw.
-  if (!lab) throw new Error(`Lab ${OCL_ID} is not registered — check the oclId`);
-  // Stored paths carry a leading slash, so match on endsWith rather than equality.
-  const file = lab.dataRoom.files.find((f) => f.path.endsWith(basename(filePath)));
-  if (!file) throw new Error("File not found in the data room");
-  const mine = file.createdBy?.toLowerCase() === agentAccount.address.toLowerCase();
-  console.log("6/6 Verified:", file.path, file.accessLevel, mine ? "— attributed to the agent" : `— createdBy: ${file.createdBy}`);
-  if (lab.shortname) {
-    console.log("Human can see it at:", `${LAB_APP_URL}/projects/${lab.shortname}`);
-  }
-}
-
-main().catch((err) => { console.error(err); process.exit(1); });
-```
-
-**Usage:**
-
-```bash
-npm i viem
-
-# First run — prints a generated agent key, then stops so the owner can grant the role
-CONSUMER_CREDENTIAL="mol_…" OCL_ID="0x0101…" node agent-upload.mjs ./findings.csv
-
-# Subsequent runs, once the owner has granted Contributor to that address
-AGENT_PRIVATE_KEY="0x…" CONSUMER_CREDENTIAL="mol_…" OCL_ID="0x0101…" \
-  node agent-upload.mjs ./findings.csv
-```
+- Do not create a Lab. If none is named, ask which one — never make one to get unstuck.
+- You need **no funds**: no gas, no tokens, no payment of any kind, on either the public or
+  the private path. This agent's key signs exactly one off-chain message and never sends a
+  transaction. If you find yourself needing a funded wallet, you are on the wrong path.
+- Some things are the owner's alone — editing the Lab's own name and image, and signing its
+  legal agreements. Do not attempt them; report them back instead.
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
+| Symptom | What it means | What to do |
 |---|---|---|
-| `UNAUTHENTICATED` on any call | `Bearer` in front of the `mol_` credential, or the credential is wrong/expired | Send the credential bare. Ask the human to check it. |
-| Consumer credential seems ignored | You also sent `x-api-key` | Send `Authorization` alone. |
-| `UNAUTHENTICATED` / `NONCE_EXPIRED` | More than 10 minutes between fetching the sign-in message and redeeming it | Fetch a **fresh** `getServiceSignInMessage` and sign again. Never retry the old signature. |
-| `UNAUTHENTICATED` / `NONCE_NOT_FOUND` | The nonce was already redeemed, or you never called `getServiceSignInMessage` | Fetch a fresh message. |
-| `UNAUTHENTICATED` / `INVALID_SIGNATURE` | The message was reformatted, rebuilt, or signed as typed data | Sign the returned `message` verbatim with `personal_sign`. |
-| `UNAUTHORIZED` right after the grant | Indexer lag — role state has not propagated | Retry with backoff. Do **not** re-issue the token or re-grant. |
-| `UNAUTHORIZED` that never clears | The wallet holds `VIEWER`, or the grant expired | Check `listLabMembers`; ask for `CONTRIBUTOR`. |
-| `NOT_FOUND` / `PROJECT_NOT_FOUND` — "Project not found: 0x…" | Wrong `oclId`, or the Lab was created seconds ago and is not indexed. Surfaces at the phase-3 members poll, before any upload, and arrives as a **thrown** query error rather than in-band | Re-check the id character for character; retry with backoff only if the Lab was genuinely just created. |
-| `UPSTREAM_UNAVAILABLE` / `MoleculeDataRoomPathOccupied` — "Path is occupied" | That `path` already exists in the data room (e.g. you re-ran the same upload) | **Do not retry** — the code is on the retryable list but this condition is permanent. Use `ref: <datasetId>` for a new version, or a different `path`. |
-| Upload `PUT` returns 403 | Headers from `initiate` were altered, or the presigned URL expired (~15 min) | Re-run `initiate` and PUT with the exact returned headers. |
+| A tool says the API credential is not set | No credential yet | Ask for their `mol_…` from the starter pack, then `save_credential`. |
+| "You are not authorized to make this call" | The credential is wrong, expired, or belongs to a different deployment than the Lab | Ask them to re-check it with the Molecule team. |
+| A tool says the credential looks wrong | It was pasted with a `Bearer` prefix, or an extra API-key header was added | Send it verbatim and alone. |
+| `No Lab named '…' here` | Wrong paste, or the credential is for a different deployment than the Lab | Ask for the full URL from the address bar of their Lab page. |
+| The agent has no role even though they say they added it | The role indexer is still catching up | Wait and call `lab_members` again. Do not re-issue the token or ask for another grant. |
+| The agent's address is not the one they granted | A second `agent_wallet(create=True)` would have replaced the identity — it now refuses unless you pass `replace=True` | Compare `agent_wallet()`'s address against the Members panel before blaming the indexer. |
+| The agent holds `VIEWER` | A Viewer can read but never upload | Ask them to change it to Contributor, and do not retry until they have. |
+| A write fails as unauthorized shortly after the grant | The same indexer lag, on the write path | Wait and retry. Re-issuing the token will not help. |
+| `'…' already exists in this data room` | That path is taken, permanently | Ask for a different path, or add a new version with `ref=`. |
+| The token expires far sooner than it claimed | `expiresIn` used the `M` unit, which the signer reads as *minutes* | Re-issue with `s`, `m`, `h`, `d` or `w` — e.g. `"30d"`. |
+| `hasRole` reverted, or came back false | A private file's lock could not be evaluated, or would deny this agent | Stop. Do **not** fall back to a public upload — report it. |
+| Decrypt fails with an access denial | **Not necessarily a permission problem.** The API evaluates a file's on-chain lock live and fails closed, so a slow or failing chain call is reported in exactly the same words as a real denial | Try again — the tools already retry a few times. Measured on a real Lab: a file whose lock evaluates true on chain was denied once and opened on the next attempt. Only a denial that survives several tries is worth investigating, and then check the wallet actually signed in before you touch any roles. |
+| The Lab owner cannot open a private file | Most often the above, or they are signed in as a different wallet than the one that owns the Lab | Have them retry first. Then compare the wallet the app shows them against the owner address in the Members panel. |
+| A change to `.env` seems to do nothing | The server read its configuration at startup | Reconnect it (`/mcp`). |
+| An upload succeeded but a later check failed | The file **is** published | Say so plainly. Do not re-upload — the path is taken. |
 
 ## Revoking
 
-The human revokes you with one on-chain call — `revokeRole(oclId, account)` — or by
-letting the grant's `expiry` lapse. Independently, you can retire your own token with
-`revokeServiceToken(tokenId)`; a token may only extend or revoke **its own** record.
+The human revokes this agent with one click in the Members panel, or by letting the role
+grant's expiry lapse. Either also ends its ability to open files it encrypted itself, so
+mention that when they pick an expiry.
+
+The token can be retired separately, and is scoped to the wallet that issued it.
 
 ## Three addresses, not interchangeable
 
-- **Your wallet** — `walletAddress` when issuing a token, `changeBy` when finishing an upload.
-- **The human owner's wallet** — theirs alone; you never need it and never ask for it.
-- **The Lab's OCL account** (`labAccountAddress`) — the Lab's own on-chain account.
+- **This agent's wallet** — the address the human grants a role to, and the identity every
+  permission check resolves to.
+- **The human owner's wallet** — theirs alone. You never need it and never ask for it.
+- **The Lab's own account** — the Lab's on-chain account, named in the lock on a private file.
 
-The `oclId` is none of these. Its trailing 40 hex characters happen to be the OCL account
-address, which makes it look interchangeable. It is not.
+The Lab's id is none of these. Its last 40 hex characters happen to *be* the Lab's account
+address, which makes them look interchangeable as arguments. They are not, and swapping them
+produces a private file nobody can open, silently. The server derives and cross-checks both
+for you — never hand-assemble them.
