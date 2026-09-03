@@ -670,6 +670,36 @@ def assert_ok(result: dict | None, operation: str) -> dict:
     return result
 
 
+def decrypt_data_key(ocl_id: str, file_path: str) -> dict:
+    """Ask for a file's data key, retrying a denial before believing it.
+
+    The API evaluates a file's on-chain conditions live and **fails closed**: if the RPC
+    call behind that evaluation times out or errors, the answer is reported as
+    "Access denied by on-chain conditions" — word for word what a genuine permission
+    failure returns. Measured on a real Lab: a file whose conditions evaluate TRUE on chain
+    was denied once and then decrypted on the next attempt.
+
+    So a single denial is not evidence of a permission problem, and treating it as one
+    sends people to re-check roles that were never wrong. Retry a few times; only a denial
+    that survives that is worth reporting.
+    """
+    last: dict | None = None
+    for attempt in range(4):
+        result = graphql(M_DECRYPT, {"oclId": ocl_id, "filePath": file_path}).get("decryptDataKey")
+        if result and result.get("plaintextDEK"):
+            return result
+        last = result or {}
+        error = last.get("error") or {}
+        reason = parse_details(error.get("details")).get("reason")
+        # A membership denial is the indexer catching up; an on-chain denial may be a
+        # transient evaluator failure. Both are worth another try. Anything else is not.
+        if reason not in ("ACCESS_DENIED", "UNAUTHORIZED", None):
+            break
+        if attempt < 3:
+            time.sleep(2 * (attempt + 1))
+    return assert_ok(last, "decryptDataKey")
+
+
 def _files_of(lab: dict | None) -> list[dict]:
     """The data room and its file list are both nullable."""
     if not lab:
@@ -1760,12 +1790,7 @@ def verify_upload(planId: str) -> str:
         "encrypted": bool(stored.get("encryptionMetadata")),
     }
     if plan["visibility"] == "private":
-        key = assert_ok(
-            graphql(M_DECRYPT, {"oclId": plan["oclId"], "filePath": stored["path"]}).get(
-                "decryptDataKey"
-            ),
-            "decryptDataKey",
-        )
+        key = decrypt_data_key(plan["oclId"], stored["path"])
         blob = _http.get(
             stored["downloadUrl"], headers=_headers_map(stored.get("downloadHeaders"))
         ).content
@@ -1862,10 +1887,7 @@ def read_data_room_file(oclId: str, path: str, outPath: str) -> str:
                 "This file predates the current encryption format and cannot be opened through "
                 "this flow. Report it to the human; there is no workaround."
             )
-        key = assert_ok(
-            graphql(M_DECRYPT, {"oclId": oclId, "filePath": stored["path"]}).get("decryptDataKey"),
-            "decryptDataKey",
-        )
+        key = decrypt_data_key(oclId, stored["path"])
         blob = decrypt_bytes(blob, key.get("iv") or metadata["iv"], key["plaintextDEK"])
     target = Path(outPath).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)

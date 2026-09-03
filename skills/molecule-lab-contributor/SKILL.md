@@ -238,7 +238,8 @@ You do not own a Lab and you never create one.
 | `'…' already exists in this data room` | That path is taken, permanently | Ask for a different path, or add a new version with `ref=`. |
 | The token expires far sooner than it claimed | `expiresIn` used the `M` unit, which the signer reads as *minutes* | Re-issue with `s`, `m`, `h`, `d` or `w` — e.g. `"30d"`. |
 | `hasRole` reverted, or came back false | A private file's lock could not be evaluated, or would deny this agent | Stop. Do **not** fall back to a public upload — report it. |
-| Decrypt fails with an access denial | Either the membership index is catching up (wait) or the conditions genuinely exclude this wallet (retrying never helps) | The tool says which one. Follow it. |
+| Decrypt fails with an access denial | **Not necessarily a permission problem.** The API evaluates a file's on-chain lock live and fails closed, so a slow or failing chain call is reported in exactly the same words as a real denial | Try again — the tools already retry a few times. Measured on a real Lab: a file whose lock evaluates true on chain was denied once and opened on the next attempt. Only a denial that survives several tries is worth investigating, and then check the wallet actually signed in before you touch any roles. |
+| The Lab owner cannot open a private file | Most often the above, or they are signed in as a different wallet than the one that owns the Lab | Have them retry first. Then compare the wallet the app shows them against the owner address in the Members panel. |
 | A change to `.env` seems to do nothing | The server read its configuration at startup | Reconnect it (`/mcp`). |
 | An upload succeeded but a later check failed | The file **is** published | Say so plainly. Do not re-upload — the path is taken. |
 
