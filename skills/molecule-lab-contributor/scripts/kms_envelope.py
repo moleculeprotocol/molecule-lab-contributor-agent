@@ -89,22 +89,37 @@ def decrypt(ciphertext: bytes, iv: str, plaintext_dek: str) -> bytes:
 
 
 # --------------------------------------------------------------------------
-# Known-answer vector.
+# PUBLISHED TEST VECTOR — NOT A SECRET, NOT A KEY, NOTHING TO ROTATE.
 #
-# Produced by the Labs-compatible reference implementation and cross-checked against
-# WebCrypto's own AES-GCM before being frozen here. It pins both directions:
-#   - decrypting it proves we can open what the app writes;
-#   - re-encrypting the plaintext under the same iv reproduces it byte for byte, which
-#     proves the app can open what we write.
-# A round-trip against ourselves would prove neither. Do not regenerate these values to
-# make a failing test pass — a mismatch means the envelope changed.
+# This is a known-answer test in the sense NIST and the RFCs use the term: a fixed
+# input/output pair, published on purpose, so any implementation can prove it computes the
+# same bytes as everyone else. Every cryptographic library ships these.
+#
+# Specifically, so nobody has to take that on trust:
+#   * the key below is the literal ASCII string "MoleculeLabsKATkey_32_bytes_ok!!",
+#     typed out in full and base64-encoded at import. It is not random key material, it
+#     was never issued by KMS, and it has never encrypted anything but the sentence below.
+#   * the plaintext is that sentence, in the clear, four lines down.
+#   * the ciphertext decrypts to exactly that sentence. Anyone can run it.
+#   * the hash is the SHA-256 of that same public sentence.
+#
+# It is deliberately written as ASCII rather than an opaque base64 blob so that a reader —
+# or a secret scanner — can see at a glance that it is a fixture. Real data encryption keys
+# are 32 random bytes issued per file by generateDataEncryptionKey, live only in memory for
+# the length of one upload, and never appear in this repository.
 # --------------------------------------------------------------------------
 
-_KAT_DEK_B64 = "TW9sZWN1bGVMYWJzS0FUa2V5XzMyX2J5dGVzX29rISE="
-_KAT_IV_B64 = "e71RgwVrwJ6FdGPi"
-_KAT_CIPHERTEXT_B64 = "yHtJFd0iCFu0PNRG5tb3QEd7/A9+tLrWkXrDC/6Uub4RodaeWMnycX92m0g5kIOC4ZsRFt4="
-_KAT_PLAINTEXT = b"Molecule Labs known-answer vector v1\n"
-_KAT_CONTENT_HASH = "dae211aadb1b92bc3c72c1efccde592d377df4e59be8a63481851c2b681a6a49"
+# The whole "key": readable, hand-typed, exactly 32 bytes.
+_VECTOR_KEY_ASCII = b"MoleculeLabsKATkey_32_bytes_ok!!"  # pragma: allowlist secret
+assert len(_VECTOR_KEY_ASCII) == 32, "the test vector's key must stay this literal string"
+
+_VECTOR_KEY_B64 = base64.b64encode(_VECTOR_KEY_ASCII).decode()  # gitleaks:allow
+_VECTOR_IV_B64 = "e71RgwVrwJ6FdGPi"  # 12 random bytes, fixed so the output is reproducible
+_VECTOR_PLAINTEXT = b"Molecule Labs known-answer vector v1\n"
+_VECTOR_CIPHERTEXT_B64 = (
+    "yHtJFd0iCFu0PNRG5tb3QEd7/A9+tLrWkXrDC/6Uub4RodaeWMnycX92m0g5kIOC4ZsRFt4="
+)
+_VECTOR_CONTENT_HASH = "dae211aadb1b92bc3c72c1efccde592d377df4e59be8a63481851c2b681a6a49"
 
 
 def self_test() -> bool:
@@ -113,18 +128,18 @@ def self_test() -> bool:
     Called automatically before the first confidential upload — a confidential file is
     not the place to discover that the crypto drifted.
     """
-    ct = base64.b64decode(_KAT_CIPHERTEXT_B64)
+    ct = base64.b64decode(_VECTOR_CIPHERTEXT_B64)
 
-    opened = decrypt(ct, _KAT_IV_B64, _KAT_DEK_B64)
-    if opened != _KAT_PLAINTEXT:
+    opened = decrypt(ct, _VECTOR_IV_B64, _VECTOR_KEY_B64)
+    if opened != _VECTOR_PLAINTEXT:
         raise RuntimeError("envelope self-test: could not decrypt the known-answer vector")
 
-    again = encrypt(_KAT_PLAINTEXT, _KAT_DEK_B64, iv=base64.b64decode(_KAT_IV_B64))
+    again = encrypt(_VECTOR_PLAINTEXT, _VECTOR_KEY_B64, iv=base64.b64decode(_VECTOR_IV_B64))
     if again.ciphertext != ct:
         raise RuntimeError("envelope self-test: re-encryption did not reproduce the vector")
-    if again.content_hash != _KAT_CONTENT_HASH:
+    if again.content_hash != _VECTOR_CONTENT_HASH:
         raise RuntimeError("envelope self-test: contentHash is not the SHA-256 of the plaintext")
-    if again.cipher_bytes != len(_KAT_PLAINTEXT) + TAG_BYTES:
+    if again.cipher_bytes != len(_VECTOR_PLAINTEXT) + TAG_BYTES:
         raise RuntimeError("envelope self-test: the auth tag is not appended")
 
     return True

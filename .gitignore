@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 .env
 .agent-key
+.ruff_cache/

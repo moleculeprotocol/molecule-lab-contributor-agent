@@ -51,18 +51,18 @@ class KnownAnswer(unittest.TestCase):
 
     def test_decrypts_the_frozen_ciphertext(self):
         opened = ke.decrypt(
-            base64.b64decode(ke._KAT_CIPHERTEXT_B64), ke._KAT_IV_B64, ke._KAT_DEK_B64
+            base64.b64decode(ke._VECTOR_CIPHERTEXT_B64), ke._VECTOR_IV_B64, ke._VECTOR_KEY_B64
         )
-        self.assertEqual(opened, ke._KAT_PLAINTEXT)
+        self.assertEqual(opened, ke._VECTOR_PLAINTEXT)
 
     def test_reproduces_the_frozen_ciphertext(self):
         again = ke.encrypt(
-            ke._KAT_PLAINTEXT, ke._KAT_DEK_B64, iv=base64.b64decode(ke._KAT_IV_B64)
+            ke._VECTOR_PLAINTEXT, ke._VECTOR_KEY_B64, iv=base64.b64decode(ke._VECTOR_IV_B64)
         )
         self.assertEqual(
-            base64.b64encode(again.ciphertext).decode(), ke._KAT_CIPHERTEXT_B64
+            base64.b64encode(again.ciphertext).decode(), ke._VECTOR_CIPHERTEXT_B64
         )
-        self.assertEqual(again.content_hash, ke._KAT_CONTENT_HASH)
+        self.assertEqual(again.content_hash, ke._VECTOR_CONTENT_HASH)
 
 
 class EnvelopeInvariants(unittest.TestCase):
