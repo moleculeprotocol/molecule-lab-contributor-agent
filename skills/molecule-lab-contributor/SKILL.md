@@ -760,8 +760,26 @@ This skill ships the flow as runnable files rather than as something to transcri
 | `scripts/access_conditions.py` | the access-condition array, plus a check that it names this Lab |
 | `scripts/selftest.py` | offline checks for the two modules above — no network, no credentials |
 
-uv is the only prerequisite; it reads the dependency block at the top of each script and
-provisions the packages and a Python to run them.
+uv is the only prerequisite. It reads the dependency block at the top of each script and
+provisions the packages **and a Python to run them** — the human does not need Python
+installed, does not need a virtualenv, and never runs `pip`.
+
+**Check for it before you start**, so a missing tool is one message rather than a
+mid-flow surprise:
+
+```bash
+uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
+# Homebrew: brew install uv
+# Windows:  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+A bare `uv: command not found` means exactly that and nothing else. Running the scripts
+with `python3` directly instead will fail on a missing dependency — the script says so and
+points back here rather than printing a traceback.
+
+Nothing is compiled: the scripts pin `no-build`, so uv always resolves to a version with a
+prebuilt wheel for the machine it is on. First run downloads ~110 MB and takes a few
+seconds; every run after that is instant.
 
 ```bash
 # 1. Identity. No upload arguments — you do not need a visibility to get an address,

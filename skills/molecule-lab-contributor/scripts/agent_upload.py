@@ -6,6 +6,17 @@
 #   "cryptography>=42",
 #   "httpx>=0.27",
 # ]
+#
+# [tool.uv]
+# # Never compile a dependency from source. eth-account pulls C/Rust extensions
+# # (ckzg, bitarray, cytoolz, pydantic-core) and cryptography has a Rust core; the
+# # newest release of some of those ships arm64-only macOS wheels, so without this an
+# # Intel Mac silently drops to a source build that needs a compiler and a Rust
+# # toolchain — an ~80s wait at best, a wall of build errors at worst. With it, uv
+# # resolves to the newest version that HAS a wheel for the machine it is on
+# # (e.g. cryptography 48.x on Intel Mac, 50.x on Apple Silicon), and if no wheel
+# # exists anywhere it says so plainly instead of trying to build.
+# no-build = true
 # ///
 """Upload one file into a Molecule Lab data room as a Contributor.
 
@@ -43,18 +54,34 @@ from typing import Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import access_conditions as ac  # noqa: E402
-import kms_envelope  # noqa: E402
-from labs_api import (  # noqa: E402
-    ENVIRONMENTS,
-    ApiError,
-    LabsClient,
-    LabsError,
-    assert_ok,
-    has_role_on_chain,
-    redact,
-    with_indexer_lag_retry,
-)
+try:
+    import access_conditions as ac  # noqa: E402
+    import kms_envelope  # noqa: E402
+    from labs_api import (  # noqa: E402
+        ENVIRONMENTS,
+        ApiError,
+        LabsClient,
+        LabsError,
+        assert_ok,
+        has_role_on_chain,
+        redact,
+        with_indexer_lag_retry,
+    )
+except ImportError as exc:  # pragma: no cover - a setup problem, not a runtime one
+    # Reached when this file is run with a bare `python3` instead of through uv, so the
+    # dependency block at the top was never resolved. Name the fix instead of dumping a
+    # traceback about a package the reader never asked for.
+    sys.stderr.write(
+        f"Missing dependency: {exc.name}\n\n"
+        "Run this through uv, which reads the dependency block at the top of this file and\n"
+        "installs everything (including a suitable Python) on first use:\n\n"
+        "    uv run agent_upload.py --help\n\n"
+        "If uv is not installed:\n"
+        "    curl -LsSf https://astral.sh/uv/install.sh | sh     # macOS / Linux\n"
+        "    brew install uv                                     # or, with Homebrew\n"
+        "    powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"   # Windows\n"
+    )
+    raise SystemExit(1)
 
 EXIT_OK, EXIT_ERROR, EXIT_WAITING, EXIT_REFUSED = 0, 1, 2, 3
 

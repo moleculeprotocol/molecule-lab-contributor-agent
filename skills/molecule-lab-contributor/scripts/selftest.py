@@ -4,6 +4,9 @@
 # dependencies = [
 #   "cryptography>=42",
 # ]
+#
+# [tool.uv]
+# no-build = true   # never compile from source; see agent_upload.py for why
 # ///
 """Offline checks for the two modules that decide whether a private file is readable.
 

@@ -69,9 +69,15 @@ sponsors that gas.
 | **`oclId`** | The Lab's 32-byte id, copied from the Lab in the app. |
 | **[uv](https://docs.astral.sh/uv/)** | `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or `brew install uv` |
 
-No MCP server and no build step. uv is the only thing to install: each script declares its
-own dependencies inline, and uv provisions both those and a suitable Python — no venv, no
-activation, no `pip install`, nothing to keep in sync.
+No MCP server and no build step. **uv is the only thing you install** — you do not need
+Python, a virtualenv, or a compiler. Each script declares its dependencies inline; uv reads
+that, fetches a suitable Python if yours is too old or missing, and caches everything. First
+run is a few seconds and ~110 MB; after that it is instant.
+
+Nothing is ever compiled from source: the scripts set `no-build`, so uv resolves to a
+version that has a prebuilt wheel for your machine (this matters on Intel Macs, where the
+newest `cryptography` and `ckzg` releases are Apple-Silicon-only and would otherwise try to
+build a Rust toolchain). Verified resolving on Linux x86/ARM/musl, Windows, and both Macs.
 
 The three dependencies are `eth-account`, `cryptography` and `httpx`. `eth-account` is not
 small — it pulls compiled extensions — and that is a deliberate trade: the alternative is
