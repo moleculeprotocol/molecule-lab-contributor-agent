@@ -163,8 +163,11 @@ def _load_dotenv(path: Path) -> dict[str, str]:
 def _bootstrap_env() -> None:
     global _CONFIG_BASE
     starts: list[Path] = []
-    if os.environ.get("CLAUDE_PLUGIN_ROOT"):
-        starts.append(Path(os.environ["CLAUDE_PLUGIN_ROOT"]))
+    # The plugin's persistent data directory first: it survives plugin updates, which
+    # replace the plugin root wholesale, so it is where the agent's identity belongs.
+    for var in ("CLAUDE_PLUGIN_DATA", "CLAUDE_PLUGIN_ROOT"):
+        if os.environ.get(var):
+            starts.append(Path(os.environ[var]))
     for getter in (lambda: Path(__file__).resolve().parent, Path.cwd):
         try:
             starts.append(getter())
@@ -374,6 +377,17 @@ def upsert_env_file(env_file: str, key: str, value: str) -> str:
         pass
     os.environ[key] = value  # usable immediately, without a restart
     return "replaced" if replaced else "appended"
+
+
+def default_env_file() -> str:
+    """Where secrets go unless the caller says otherwise.
+
+    As a plugin, that is the persistent data directory Claude Code gives the plugin: it
+    survives updates, and it does not depend on which folder the human happened to open.
+    Outside a plugin it is the project's own .env, as before.
+    """
+    data = os.environ.get("CLAUDE_PLUGIN_DATA")
+    return str(Path(data) / ".env") if data else ".env"
 
 
 # ==========================================================================
@@ -799,8 +813,8 @@ def _account():
     key = env("MOLECULE_AGENT_PRIVATE_KEY")
     if not key:
         raise ToolError(
-            "MOLECULE_AGENT_PRIVATE_KEY is not set. Call agent_wallet(create=True, "
-            "envFile='.env') once to create this agent's identity and store it."
+            "MOLECULE_AGENT_PRIVATE_KEY is not set. Call agent_wallet(create=True) once to "
+            "create this agent's identity and store it."
         )
     body = key[2:] if key.startswith("0x") else key
     if len(body) != 64 or any(c not in "0123456789abcdefABCDEF" for c in body):
@@ -852,11 +866,10 @@ def config_doctor() -> str:
             issues.append(str(exc))
     elif not issues:
         issues.append("MOLECULE_AGENT_PRIVATE_KEY is not set — this agent has no identity yet.")
-        fixes.append("Call agent_wallet(create=True, envFile='.env').")
+        fixes.append("Call agent_wallet(create=True).")
     else:
         fixes.append(
-            "Once the credential is saved, call agent_wallet(create=True, envFile='.env') — in "
-            "that order."
+            "Once the credential is saved, call agent_wallet(create=True) — in that order."
         )
 
     try:
@@ -872,6 +885,7 @@ def config_doctor() -> str:
             "agentWallet": wallet or "not created yet",
             "serviceToken": "set" if env("MOLECULE_SERVICE_TOKEN") else "not issued yet",
             "configLoadedFrom": _ENV_SOURCES,
+            "secretsFile": str(Path(default_env_file()).expanduser().resolve()),
             "settingsBase": _CONFIG_BASE,
             "issues": issues,
             "fixes": fixes,
@@ -892,11 +906,12 @@ def config_doctor() -> str:
 
 
 @mcp.tool()
-def save_credential(credential: str, envFile: str = ".env") -> str:
+def save_credential(credential: str, envFile: str | None = None) -> str:
     """Store the human's Molecule API credential so this and later sessions can use it.
 
     `credential` is the mol_… string from their starter pack. It is written to envFile at
-    mode 0600 and takes effect immediately. The value is never echoed back.
+    mode 0600 and takes effect immediately. The value is never echoed back. Leave envFile
+    unset: the default is the plugin's persistent data directory, which survives updates.
 
     Think of it as an API key for the Labs API: it identifies whose calls these are and can
     be revoked. It is NOT the agent's wallet key and NOT the human's wallet — it grants no
@@ -908,6 +923,7 @@ def save_credential(credential: str, envFile: str = ".env") -> str:
             "come from the starter pack or the Molecule team. Ask the human for theirs rather "
             "than inventing one."
         )
+    envFile = envFile or default_env_file()
     action = upsert_env_file(envFile, "MOLECULE_CONSUMER_CREDENTIAL", value)
     return dump(
         {
@@ -916,8 +932,7 @@ def save_credential(credential: str, envFile: str = ".env") -> str:
             "action": f"{action} MOLECULE_CONSUMER_CREDENTIAL",
             "next_step": (
                 "Do not repeat the credential back to the human or put it anywhere they might "
-                "share. Now call agent_wallet(create=True, envFile=…) to create this agent's "
-                "identity."
+                "share. Now call agent_wallet(create=True) to create this agent's identity."
             ),
         }
     )
@@ -930,9 +945,10 @@ def agent_wallet(create: bool = False, envFile: str | None = None, replace: bool
     Reachable with no upload details at all: getting an address to hand the human must never
     require having decided what to upload.
 
-    With create=True and envFile, generates a key, writes it into that .env as
-    MOLECULE_AGENT_PRIVATE_KEY (creating the file at mode 0600, replacing any existing line)
-    and returns ONLY the address. The key is never returned or logged.
+    With create=True, generates a key, writes it into a .env as MOLECULE_AGENT_PRIVATE_KEY
+    (creating the file at mode 0600, replacing any existing line) and returns ONLY the
+    address. The key is never returned or logged. Leave envFile unset: as a plugin the
+    default is the persistent data directory, which survives plugin updates.
 
     Call this AFTER the API credential is saved."""
     if not create:
@@ -943,11 +959,15 @@ def agent_wallet(create: bool = False, envFile: str | None = None, replace: bool
             }
         )
     if not envFile:
-        raise ToolError(
-            "Pass envFile to say where the key should be stored — '.env' in the project is the "
-            "usual answer. Ask the human first: generating a key with nowhere to put it wastes "
-            "the Lab owner's role grant, because the next run would be a different agent."
-        )
+        if os.environ.get("CLAUDE_PLUGIN_DATA"):
+            envFile = default_env_file()
+        else:
+            raise ToolError(
+                "Pass envFile to say where the key should be stored — '.env' in the project is "
+                "the usual answer. Ask the human first: generating a key with nowhere to put it "
+                "wastes the Lab owner's role grant, because the next run would be a different "
+                "agent."
+            )
     if env("MOLECULE_AGENT_PRIVATE_KEY") and not replace:
         existing = _account().address
         raise ToolError(

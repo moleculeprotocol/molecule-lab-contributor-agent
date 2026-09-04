@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "mol-labs": {
+      "command": "${COMSPEC:-${CLAUDE_PLUGIN_ROOT}/mcp/launch}",
+      "args": [
+        "/c",
+        "${CLAUDE_PLUGIN_ROOT}/mcp/launch.cmd"
+      ],
+      "env": {
+        "UV_CACHE_DIR": "${CLAUDE_PLUGIN_DATA}/cache",
+        "UV_PYTHON_INSTALL_DIR": "${CLAUDE_PLUGIN_DATA}/python",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_NO_PROGRESS": "1"
+      }
+    }
+  }
+}

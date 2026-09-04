@@ -1,0 +1,46 @@
+#!/bin/sh
+# Starts the mol-labs MCP server on macOS and Linux. .mcp.json points here.
+#
+# On Windows the same .mcp.json entry resolves to cmd.exe running launch.cmd instead, and
+# the two arguments Claude Code passes ("/c" and the path of launch.cmd) are for that case;
+# this script ignores them.
+#
+# The job here is to make the very first spawn succeed. Claude Code starts this process at
+# the same moment the SessionStart hook begins first-time setup, and a spawn that fails is
+# remembered for fifteen minutes. So: if setup is running, wait for it; if it never ran, do
+# it here; then hand over to the private uv. Nothing may be written to stdout — that is the
+# MCP channel — so every message goes to stderr or the log.
+
+set -u
+
+# As a plugin, Claude Code sets both of these. Opened as a plain project (a developer
+# working on this repository), they are unset: the root is this checkout and the data
+# directory is a gitignored folder inside it. Only setup needs to know; the server keeps
+# reading its .env from the project in that case, as it always has.
+ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+DATA="${CLAUDE_PLUGIN_DATA:-$ROOT/.plugin-data}"
+UV="$DATA/uv/uv"
+LOCK="$DATA/bootstrap.lock"
+SERVER="$ROOT/mcp/server.py"
+
+wait_for_setup() {
+  n=0
+  while [ -d "$LOCK" ] && [ "$n" -lt 600 ]; do
+    sleep 1
+    n=$((n + 1))
+  done
+}
+
+wait_for_setup
+if [ ! -x "$UV" ]; then
+  # The hook has not run (hooks disabled, or a plain `claude --plugin-dir` before the hook
+  # fired). Run setup here; its stdout is meant for the agent, so send it to stderr.
+  CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$DATA" sh "$ROOT/mcp/bootstrap.sh" 1>&2
+  wait_for_setup
+fi
+if [ ! -x "$UV" ]; then
+  echo "mol-labs: no usable uv at $UV — see $DATA/bootstrap.log" 1>&2
+  exit 1
+fi
+
+exec "$UV" run --script "$SERVER"
