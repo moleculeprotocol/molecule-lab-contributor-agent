@@ -1,12 +1,15 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "molecule-lab-contributor-agent",
-  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own wallet, the Lab owner grants it the Contributor role, and the agent issues its own token and writes files to the data room \u2014 public, or client-side encrypted. It never picks the visibility itself: every upload is staged, read back to the human, and written only after they approve it. Backed by the mol-labs MCP server (Python, run with uv \u2014 nothing to install).",
-  "version": "0.4.0",
+  "displayName": "Molecule Lab Contributor",
+  "version": "0.5.0",
+  "description": "Let an AI agent work inside a Molecule Lab that someone else owns. The agent generates its own identity key, the Lab owner grants it the Contributor role in the Labs app, and the agent issues its own token and writes files to the data room — public, or client-side encrypted. It never picks the visibility itself: every upload is staged, read back to the human, and written only after they approve it. The identity key holds no funds and never sends a transaction: no gas, no tokens, no payments. Backed by the bundled mol-labs MCP server (Python, run with uv).",
   "author": {
     "name": "Molecule",
     "email": "vladimir@molecule.to"
   },
-  "homepage": "https://docs.molecule.xyz",
+  "homepage": "https://github.com/moleculeprotocol/molecule-lab-contributor-agent#readme",
+  "repository": "https://github.com/moleculeprotocol/molecule-lab-contributor-agent",
   "license": "Apache-2.0",
   "keywords": [
     "desci",
@@ -17,7 +20,10 @@
     "service-token",
     "graphql",
     "encryption",
-    "private-upload"
+    "private-upload",
+    "research",
+    "data-room",
+    "mcp"
   ],
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./mcp/servers.json"
 }

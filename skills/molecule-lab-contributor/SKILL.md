@@ -61,7 +61,7 @@ data room it is the dangerous one.
 |---|---|
 | **A Molecule API credential** | The `mol_…` string. **Think of it as an API key** — it identifies whose calls these are, counts against their quota, and can be revoked. It is not a wallet, holds no funds, and signs nothing. |
 | **Their Lab** | Whichever Lab they want you writing into. Nobody needs to hunt for its id — see below. |
-| **[uv](https://docs.astral.sh/uv/)** | The one thing they install, and installing the plugin does **not** install it: `curl -LsSf https://astral.sh/uv/install.sh \| sh`, or `brew install uv`. The server's dependencies are declared inside `mcp/server.py` itself, so uv fetches them — and a Python to run them on — the first time it starts. Nothing to configure, nothing compiled. If the server will not connect, check `uv --version` before anything else. |
+| **Nothing else** | They install no Python, no pip, no uv. The plugin sets itself up on first run — a private uv and the server's environment go into the plugin's own data directory. If the `mol-labs` tools are missing in the first session after installing, ask them to type `/reload-plugins` once. If setup itself failed, the session-start message says so and names the log; relay it rather than improvising. |
 
 ### Where the API credential comes from
 

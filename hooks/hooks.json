@@ -1,0 +1,18 @@
+{
+  "description": "Installs a private uv and builds the mol-labs server's Python environment on first use, so the human installs nothing.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/mcp/bootstrap.sh\"",
+            "timeout": 600,
+            "statusMessage": "Setting up the Molecule Labs server (first time only)"
+          }
+        ]
+      }
+    ]
+  }
+}
