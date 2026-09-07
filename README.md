@@ -75,6 +75,9 @@ app's **Code** tab as much as in a terminal. No terminal is needed.
 /plugin install molecule-lab-contributor-agent@molecule-lab-contributor-agent-marketplace
 ```
 
+Driving it with something other than Claude — Grok, or any MCP client — is supported and
+takes about as long: see [Running it on another agent](#running-it-on-another-agent).
+
 The first session after installing spends its first half-minute or so setting up, with a
 status line that says so, and the `mol-labs` tools are ready in that same session. On a slow
 connection the first attempt can time out; the agent will then tell you to type
@@ -141,8 +144,90 @@ One list, in one place, that cannot drift from the code that imports it.
 **If the server does not connect**, read `bootstrap.log` in the plugin's data directory
 first; then ask the agent to run `config_doctor`.
 
-**Any other MCP-capable agent** — point it at `uv run /path/to/mcp/server.py` (with a uv of
-its own) and give it `skills/molecule-lab-contributor/SKILL.md` as context.
+## Running it on another agent
+
+Nothing here is specific to Claude. The whole flow lives in the `mol-labs` MCP server and
+its two secrets; the skill file is just the playbook the driving agent follows. Any agent
+that speaks MCP over stdio and can hold an eight-step plan can run it.
+
+### Grok
+
+[Grok Build](https://docs.x.ai/build/overview), xAI's CLI agent, reads Claude Code
+marketplaces, plugins, skills and MCP servers directly, so this installs with the same two
+lines and no config authoring:
+
+```
+grok plugin marketplace add moleculeprotocol/molecule-lab-contributor-agent
+grok plugin install molecule-lab-contributor-agent --trust
+```
+
+`--trust` is not optional. Without it Grok finds the plugin but leaves its hooks and its
+MCP server inactive, which looks exactly like a broken install. Plugins are also off until
+enabled — press <kbd>Space</kbd> on it in the `/plugins` modal, or list it in
+`~/.grok/config.toml`:
+
+```toml
+[plugins]
+enabled = ["molecule-lab-contributor-agent"]
+```
+
+Grok reads the skill too, so the agent gets the same playbook and the same confirmation
+gate it has under Claude Code.
+
+One thing to know about the first run. Grok gives an MCP server **30 seconds** to start,
+and the first launch is the one that downloads a private Python and about fifty packages —
+longer than that on a cold machine. The first session comes up with no `mol-labs` tools;
+setup carries on in the background and the next session connects normally.
+
+If you would rather not spend a session on that, register the server yourself with a longer
+budget. It needs the whole entry, not just the timeout — an `[mcp_servers.*]` section
+without a `command` is skipped. `grok plugin details molecule-lab-contributor-agent` prints
+the install path:
+
+```toml
+[mcp_servers.mol-labs]
+command = "<install path>/mcp/launch"
+startup_timeout_sec = 600
+```
+
+**What will not work is Grok's hosted MCP** — the API's `mcp` tool type and the custom
+connectors on grok.com. Both accept only Streamable HTTP and SSE, and they reject
+`localhost` and private addresses outright. This server is stdio and holds your credential
+and the agent's key on your machine, so there is nothing to point them at.
+
+Please do not reach for a tunnel to get around that. Wrapping the server with
+supergateway or ngrok does technically work, and it publishes an unauthenticated
+upload-and-read tool surface — backed by the agent's signing key — on a public URL, to be
+called by anyone who learns it. Use an agent that can start a local process instead.
+
+### Any other MCP client
+
+opencode, Goose, Cline, Codex and VS Code agent mode all spawn local stdio servers, and most
+let you choose the model behind them. Clone the repository and register `mcp/launch` — not
+`mcp/server.py`. The launcher installs its own private uv and Python on first run and passes
+the plugin's paths to the server, so there is nothing to put on `PATH` and no environment to
+set:
+
+```json
+{
+  "mcpServers": {
+    "mol-labs": {
+      "command": "/absolute/path/to/molecule-lab-contributor-agent/mcp/launch"
+    }
+  }
+}
+```
+
+Adapt the shape to whatever the client uses — a `command` and no arguments is all of it.
+On Windows, run `mcp/launch.cmd` through `cmd.exe` instead.
+
+Then give the agent `skills/molecule-lab-contributor/SKILL.md` as context. Claude Code and
+Grok load it from the plugin; every other client needs it pasted in or referenced as a
+system prompt, and without it the agent has the tools but not the rules — including the
+one that matters, which is that it must never choose public or private for you.
+
+Run this way, the plugin's data directory is a gitignored `.plugin-data/` inside the
+checkout, and that is where `.env` and the agent's key live. Keep the checkout.
 
 ## Configuration
 
