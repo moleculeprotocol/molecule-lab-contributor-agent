@@ -11,6 +11,12 @@ set "DATA=%CLAUDE_PLUGIN_DATA%"
 rem Opened as a plain project rather than a plugin: this checkout, and a gitignored folder in it.
 if "%ROOT%"=="" set "ROOT=%~dp0.."
 if "%DATA%"=="" set "DATA=%ROOT%\.plugin-data"
+rem Hand both to the server itself, under the names it reads. Claude Code already sets them,
+rem so this is a no-op there; other MCP hosts only substitute these tokens into the strings
+rem of the server entry, leaving the process without them. The server then falls back to a
+rem .env resolved against the host's working directory and refuses to store the agent's key.
+set "CLAUDE_PLUGIN_ROOT=%ROOT%"
+set "CLAUDE_PLUGIN_DATA=%DATA%"
 set "UV=%DATA%\uv\uv.exe"
 set "LOCK=%DATA%\bootstrap.lock"
 set "LOG=%DATA%\bootstrap.log"
