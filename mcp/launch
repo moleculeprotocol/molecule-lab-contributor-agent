@@ -19,6 +19,17 @@ set -u
 # reading its .env from the project in that case, as it always has.
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DATA="${CLAUDE_PLUGIN_DATA:-$ROOT/.plugin-data}"
+
+# Hand both to the server as environment variables, not just as shell variables local to
+# this script. Claude Code puts them in the spawned process's environment itself, so this
+# is a no-op there. Every other MCP host is the reason it is here: they substitute these
+# tokens into the strings of the server entry and stop, leaving the process itself without
+# them. The server then has no persistent home — it falls back to a .env resolved against
+# whatever directory the host happened to launch from, and agent_wallet(create=True)
+# refuses to generate a key rather than put one somewhere that will not be found again.
+export CLAUDE_PLUGIN_ROOT="$ROOT"
+export CLAUDE_PLUGIN_DATA="$DATA"
+
 UV="$DATA/uv/uv"
 LOCK="$DATA/bootstrap.lock"
 SERVER="$ROOT/mcp/server.py"
