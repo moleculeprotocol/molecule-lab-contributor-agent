@@ -318,9 +318,10 @@ There are two cases, and you never have to work out which one you are in: **`con
 reports the exact path as `secretsFile`**, and that is the only answer worth trusting.
 
 Installed as a plugin, `.env` lives in the host's plugin data directory — under Claude Code
-that is `~/.claude/plugins/data/<plugin>-<marketplace>/.env` (the name is doubled when the
-plugin and the marketplace share a name), so it survives updates and does not depend on which
-folder you opened. Registered by hand from a clone, or under a host that passes no plugin
+that is `~/.claude/plugins/data/<plugin>-<marketplace>/.env` — which reads as
+a doubled name here only because this marketplace is named after the plugin it carries — so it
+survives updates and does not depend on which folder you opened. Registered by hand from a
+clone, or under a host that passes no plugin
 variables, the launcher points it at `plugins/molecule-lab-contributor-agent/.plugin-data/.env`
 instead.
 
@@ -333,9 +334,9 @@ copying it in place. Two gotchas worth knowing:
 - On macOS `.env` is hidden in Finder — `Cmd+Shift+.` shows hidden files.
 - The server reads configuration once at startup, so reconnect it (`/mcp`) after editing.
 
-Everything else has a working default. `plugins/molecule-lab-contributor-agent/.env.example` lists the endpoint overrides, which
-exist so the Molecule team can point an agent at another deployment for testing; you should
-not need to touch them.
+Everything else has a working default. The plugin's `.env.example` lists the endpoint
+overrides, which exist so the Molecule team can point an agent at another deployment for
+testing; you should not need to touch them.
 
 ## Privacy and data
 
