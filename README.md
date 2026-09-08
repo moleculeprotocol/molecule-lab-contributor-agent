@@ -87,8 +87,11 @@ Or from a clone:
 
 ```bash
 git clone https://github.com/moleculeprotocol/molecule-lab-contributor-agent.git
-claude --plugin-dir /path/to/molecule-lab-contributor-agent
+claude --plugin-dir /path/to/molecule-lab-contributor-agent/plugins/molecule-lab-contributor-agent
 ```
+
+The repository is a marketplace whose one plugin lives in `plugins/`, so `--plugin-dir`
+points at the plugin, not at the checkout root.
 
 ### How the plugin sets itself up
 
@@ -106,7 +109,7 @@ first run it does two things, both into the plugin's own persistent data directo
 Every later run compares a hash of `server.py` to a stamp and does nothing unless the server
 changed. On Windows the hook runs under Git Bash, which the Code tab already requires.
 
-**A launcher** is what the server entry in `mcp/servers.json` actually starts: `mcp/launch` on macOS and Linux,
+**A launcher** is what the server entry in `.mcp.json` actually starts: `mcp/launch` on macOS and Linux,
 `mcp/launch.cmd` through `cmd.exe` on Windows — one entry, resolved per platform by
 `${COMSPEC:-…}`. It exists before setup has run, which matters: Claude Code spawns the server
 at the same moment the hook starts, and a spawn that fails is remembered for fifteen minutes.
@@ -117,10 +120,17 @@ desktop app inheriting your shell environment.
 The setup log is `bootstrap.log` in that data directory. If setup fails — usually because
 the machine was offline — the agent is told so in words and relays it.
 
-There is deliberately no `.mcp.json` at the repository root: the server entry needs the
-plugin variables Claude Code sets only for plugins, so working on this repository means
-running it as one, with `claude --plugin-dir .`. Run by hand, the launchers fall back to a
-gitignored `.plugin-data/` folder inside the checkout.
+The server entry lives in `.mcp.json` beside the plugin manifest, and it is the only copy —
+neither manifest repeats it. That file, not a `mcpServers` path in `plugin.json`, is what
+every host reads: Claude Code picks up a plugin's `.mcp.json` on its own, and it is the only
+form Grok reads at all. The entry needs the plugin variables a host sets only for plugins, so
+working on this repository means running it as one — `claude --plugin-dir plugins/molecule-lab-contributor-agent`
+from the checkout root. Run by hand, the launchers fall back to a gitignored `.plugin-data/`
+folder inside the plugin directory.
+
+The plugin sits in `plugins/` rather than at the repository root for the same
+cross-host reason: a marketplace entry whose `source` is the root resolves in Claude Code but
+not in Grok, which silently lists no plugin at all.
 
 ### How the Python dependencies get installed
 
@@ -159,6 +169,14 @@ lines and no config authoring:
 ```
 grok plugin marketplace add moleculeprotocol/molecule-lab-contributor-agent
 grok plugin install molecule-lab-contributor-agent --trust
+```
+
+If Grok answers that it "couldn't scan every marketplace" it is refusing to guess between
+sources, not failing on this one — any unreachable marketplace you have added, from Claude or
+otherwise, triggers it. Pin the source and it proceeds:
+
+```
+grok plugin install molecule-lab-contributor-agent@molecule-lab-contributor-agent-marketplace --trust
 ```
 
 `--trust` is not optional. Without it Grok finds the plugin but leaves its hooks and its
