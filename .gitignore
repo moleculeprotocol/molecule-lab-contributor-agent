@@ -4,6 +4,5 @@ __pycache__/
 *.pyc
 .venv/
 .env
-.agent-key
-.ruff_cache/
+.claude/
 .plugin-data/

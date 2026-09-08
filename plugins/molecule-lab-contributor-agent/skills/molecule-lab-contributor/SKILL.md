@@ -92,15 +92,20 @@ is caught before an upload rather than after one.
 
 ### A note on `.env`
 
-The two secrets live in a `.env` file beside the project, and the server reads it at
-startup. Two things worth telling the human once:
+The two secrets live in a `.env` the server manages itself. **Never guess where it is and
+never tell the human to create one** — `config_doctor` reports the exact path as
+`secretsFile`, and that is the only answer. It is not in the folder they opened, and it is
+not at the root of the plugin's repository. Two things worth telling them once:
 
 - On macOS `.env` is **hidden in Finder** — `Cmd+Shift+.` toggles hidden files.
 - The server reads its configuration **once, when it starts.** If they edit `.env`,
   reconnect the server (`/mcp` in Claude Code) or the change will look like it did nothing.
 
-`save_credential`, `agent_wallet(create=True, …)` and `issue_service_token(…, envFile=…)` all
-write into that file for them, so nobody has to hand-edit it.
+`save_credential`, `agent_wallet(create=True)` and `issue_service_token` all write into that
+file for them, so nobody has to hand-edit it. **Do not pass `envFile` to any of them.** The
+default is already the right place; a relative path like `".env"` is resolved against
+whatever directory the server happens to be running in, which is how a key ends up somewhere
+the next session will not find it.
 
 ---
 
@@ -127,7 +132,9 @@ a reason that has nothing to do with the wallet. `config_doctor` orders its `fix
 
 ### Step 3 — hand over the address, then stop
 
-`agent_wallet(create=True, envFile=".env")` returns an address and nothing else. Tell them:
+`agent_wallet(create=True)` returns an address and nothing else — no `envFile`; the default
+is the plugin's own data directory, and the tool reports back where it wrote the key. Tell
+them:
 
 > This agent's address is `0x…`. In the Labs app, open your Lab → **Members** → add that
 > address with the **Contributor** role, then tell me when it's done.

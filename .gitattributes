@@ -1,0 +1,8 @@
+* text=auto
+
+# The POSIX launcher and the setup script are run by /bin/sh; CRLF would break the shebang.
+*.sh            text eol=lf
+plugins/molecule-lab-contributor-agent/mcp/launch text eol=lf
+
+# The Windows launcher is run by cmd.exe, which wants CRLF.
+*.cmd           text eol=crlf

@@ -8,7 +8,9 @@ rem stdout - that is the MCP channel.
 setlocal
 set "ROOT=%CLAUDE_PLUGIN_ROOT%"
 set "DATA=%CLAUDE_PLUGIN_DATA%"
-rem Opened as a plain project rather than a plugin: this checkout, and a gitignored folder in it.
+rem Run any other way than as a plugin: ROOT is this plugin folder (the parent of this
+rem script's directory - plugins\molecule-lab-contributor-agent, not the repository root),
+rem and DATA a gitignored .plugin-data inside it. Both are exported below.
 if "%ROOT%"=="" set "ROOT=%~dp0.."
 if "%DATA%"=="" set "DATA=%ROOT%\.plugin-data"
 rem Hand both to the server itself, under the names it reads. Claude Code already sets them,
