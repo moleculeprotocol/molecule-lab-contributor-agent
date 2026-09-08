@@ -218,6 +218,34 @@ supergateway or ngrok does technically work, and it publishes an unauthenticated
 upload-and-read tool surface — backed by the agent's signing key — on a public URL, to be
 called by anyone who learns it. Use an agent that can start a local process instead.
 
+### Codex
+
+```
+codex plugin marketplace add https://github.com/moleculeprotocol/molecule-lab-contributor-agent.git
+codex plugin add molecule-lab-contributor-agent@molecule-lab-contributor-agent-marketplace
+```
+
+That installs the skill and enables the plugin. The MCP server takes one more line, and the
+reason is worth stating because it looks like a bug otherwise: **Codex treats an MCP command
+as a literal path.** It expands no variables — `${CLAUDE_PLUGIN_ROOT}`, `${CODEX_PLUGIN_ROOT}`
+and `${COMSPEC:-…}` all reach the OS unexpanded — and it does not resolve one relative to the
+plugin either. So the entry in `.mcp.json`, which is what Claude Code and Grok both read,
+cannot work there. Codex registers it, lists it as enabled, and the server never starts.
+
+`codex plugin list` prints the installed plugin root. Point Codex at the launcher inside it:
+
+```
+codex mcp add mol-labs -- /path/to/installed/plugin/mcp/launch
+```
+
+No environment block, and nothing on `PATH`: the launcher works out its own paths, exports
+them, and installs its own uv and Python on first run. Codex hands an MCP server no plugin
+variables at all, which is exactly why the launcher does that for itself.
+
+One thing Codex will not do for you: its `SessionStart` hook does not fire under
+`codex exec`, so the first run bootstraps inside the server's own startup instead of ahead
+of it. That first start is slow; later ones are not.
+
 ### Any other MCP client
 
 opencode, Goose, Cline, Codex and VS Code agent mode all spawn local stdio servers, and most
