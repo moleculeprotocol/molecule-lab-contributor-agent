@@ -65,6 +65,34 @@ a transaction — no gas, no tokens, no payments. Encryption adds no cost.
 That is the whole list. There is nothing to install by hand: no Python, no `pip`, no
 virtualenv, no uv. The plugin sets itself up the first time it runs (see below).
 
+## What is in this repository
+
+This repository is a **marketplace** that contains **one plugin**. That is why
+`.claude-plugin/` appears twice — they are two different, host-mandated files:
+
+```
+.claude-plugin/marketplace.json        the catalogue: "this repo offers these plugins"
+LICENSE, README.md                     repository-level, shared
+plugins/
+└── molecule-lab-contributor-agent/    the plugin itself — point --plugin-dir here
+    ├── .claude-plugin/plugin.json     the manifest: name, version, what it ships
+    ├── .codex-plugin/plugin.json      the same, in Codex's format
+    ├── .mcp.json                      the mol-labs server entry (every host reads this)
+    ├── .env.example                   a template — never filled in here, see Configuration
+    ├── hooks/hooks.json               the first-run setup hook
+    ├── mcp/                           the server and its launchers
+    └── skills/molecule-lab-contributor/SKILL.md
+```
+
+Neither `.claude-plugin` file can be renamed or merged: Claude Code, Grok and Codex all look
+for exactly those names in exactly those places. The plugin sits under `plugins/` rather than
+at the root because a marketplace entry pointing at the root resolves in Claude Code but
+silently lists nothing in Grok.
+
+Two directories are created at runtime and are gitignored, never committed:
+`plugins/molecule-lab-contributor-agent/.plugin-data/` (the private uv, Python and `.env`)
+and `mcp/__pycache__/`.
+
 ## Install
 
 Paste these two lines into the Claude Code prompt, one at a time — in the Claude desktop
@@ -249,31 +277,33 @@ of it. That first start is slow; later ones are not.
 ### Any other MCP client
 
 opencode, Goose, Cline, Codex and VS Code agent mode all spawn local stdio servers, and most
-let you choose the model behind them. Clone the repository and register `mcp/launch` — not
-`mcp/server.py`. The launcher installs its own private uv and Python on first run and passes
-the plugin's paths to the server, so there is nothing to put on `PATH` and no environment to
-set:
+let you choose the model behind them. Clone the repository and register the launcher inside the
+plugin folder — `plugins/molecule-lab-contributor-agent/mcp/launch`, not `mcp/server.py`.
+The launcher installs its own private uv and Python on first run and passes the plugin's
+paths to the server, so there is nothing to put on `PATH` and no environment to set:
 
 ```json
 {
   "mcpServers": {
     "mol-labs": {
-      "command": "/absolute/path/to/molecule-lab-contributor-agent/mcp/launch"
+      "command": "/absolute/path/to/molecule-lab-contributor-agent/plugins/molecule-lab-contributor-agent/mcp/launch"
     }
   }
 }
 ```
 
 Adapt the shape to whatever the client uses — a `command` and no arguments is all of it.
-On Windows, run `mcp/launch.cmd` through `cmd.exe` instead.
+On Windows, run `plugins/molecule-lab-contributor-agent/mcp/launch.cmd` through `cmd.exe` instead.
 
-Then give the agent `skills/molecule-lab-contributor/SKILL.md` as context. Claude Code and
-Grok load it from the plugin; every other client needs it pasted in or referenced as a
+Then give the agent the skill file as context —
+`plugins/molecule-lab-contributor-agent/skills/molecule-lab-contributor/SKILL.md`. Claude
+Code and Grok load it from the plugin; every other client needs it pasted in or referenced as a
 system prompt, and without it the agent has the tools but not the rules — including the
 one that matters, which is that it must never choose public or private for you.
 
-Run this way, the plugin's data directory is a gitignored `.plugin-data/` inside the
-checkout, and that is where `.env` and the agent's key live. Keep the checkout.
+Run this way, the plugin's data directory is `plugins/molecule-lab-contributor-agent/.plugin-data/`
+— gitignored, inside the plugin folder rather than the checkout root — and that is where
+`.env` and the agent's key live. Keep the checkout.
 
 ## Configuration
 
@@ -284,17 +314,26 @@ Two secrets, and the agent writes both for you:
 "create your wallet"                   -> writes MOLECULE_AGENT_PRIVATE_KEY to .env
 ```
 
-As a plugin, that `.env` lives in the plugin's persistent data directory
-(`~/.claude/plugins/data/<plugin>/.env`), so it survives plugin updates and does not depend
-on which folder you opened. `config_doctor` reports the exact path as `secretsFile`. Run
-from a clone instead of as a plugin, it is `.env` in the project. It is created at mode
-0600 and is gitignored. Copy `.env.example` if you would rather fill it in yourself. Two
-gotchas worth knowing:
+There are two cases, and you never have to work out which one you are in: **`config_doctor`
+reports the exact path as `secretsFile`**, and that is the only answer worth trusting.
+
+Installed as a plugin, `.env` lives in the host's plugin data directory — under Claude Code
+that is `~/.claude/plugins/data/<plugin>-<marketplace>/.env` (the name is doubled when the
+plugin and the marketplace share a name), so it survives updates and does not depend on which
+folder you opened. Registered by hand from a clone, or under a host that passes no plugin
+variables, the launcher points it at `plugins/molecule-lab-contributor-agent/.plugin-data/.env`
+instead.
+
+It is created at mode 0600 and is gitignored. **Do not put a `.env` at the root of the
+checkout** — nothing reads it there once the plugin is installed, and it will look like the
+credential simply stopped working. To fill one in by hand, copy
+`plugins/molecule-lab-contributor-agent/.env.example` to the `secretsFile` path rather than
+copying it in place. Two gotchas worth knowing:
 
 - On macOS `.env` is hidden in Finder — `Cmd+Shift+.` shows hidden files.
 - The server reads configuration once at startup, so reconnect it (`/mcp`) after editing.
 
-Everything else has a working default. `.env.example` lists the endpoint overrides, which
+Everything else has a working default. `plugins/molecule-lab-contributor-agent/.env.example` lists the endpoint overrides, which
 exist so the Molecule team can point an agent at another deployment for testing; you should
 not need to touch them.
 
@@ -318,7 +357,7 @@ How Molecule handles the data that reaches its services is covered by the
 
 - Bugs and questions: [GitHub issues](https://github.com/moleculeprotocol/molecule-lab-contributor-agent/issues)
 - Molecule community: the [Molecule Discord](https://t.co/L0VEiy4Bjk)
-- Security concerns: email the maintainer listed in `.claude-plugin/plugin.json` rather than opening a public issue.
+- Security concerns: email vladimir@molecule.to rather than opening a public issue.
 
 ## Scope
 

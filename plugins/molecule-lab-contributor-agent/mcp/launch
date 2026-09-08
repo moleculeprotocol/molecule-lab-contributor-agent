@@ -13,10 +13,11 @@
 
 set -u
 
-# As a plugin, Claude Code sets both of these. Opened as a plain project (a developer
-# working on this repository), they are unset: the root is this checkout and the data
-# directory is a gitignored folder inside it. Only setup needs to know; the server keeps
-# reading its .env from the project in that case, as it always has.
+# As a plugin, the host sets both of these. Run any other way — a developer working on this
+# repository, or an MCP client that passes no plugin variables, Codex included — they are
+# unset, and the root is then this plugin folder (the parent of mcp/, i.e.
+# plugins/molecule-lab-contributor-agent, NOT the repository root) with a gitignored
+# .plugin-data inside it. Both are exported below, so the server always knows its own home.
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DATA="${CLAUDE_PLUGIN_DATA:-$ROOT/.plugin-data}"
 
