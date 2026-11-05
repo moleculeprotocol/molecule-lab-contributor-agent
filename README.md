@@ -1,5 +1,16 @@
 # Molecule Labs — agent skill
 
+## This plugin is retired
+
+Use [Agent Connect](https://docs.molecule.xyz/ai-tooling/agent-connect) instead. It works with
+Claude, ChatGPT, Codex, Grok and Cursor: you paste one address into your app and approve the
+connection in your browser. There are no keys to manage. The app gets its own agent, with its
+own wallet and a role on each Lab you connect it to.
+
+This repository is archived and gets no more fixes. The Labs API is removing the `changeBy`
+argument, which this plugin sends with every upload, so uploads from an existing install will
+fail once it is gone. The removal is planned for 2026-12-08. Move to Agent Connect before then.
+
 A skill plus a small MCP server that let an AI agent write files into a **Molecule Lab that
 a human owns**.
 
